@@ -19,7 +19,3 @@
 
 [functions]
   node_bundler = "esbuild"
-
-# Scheduled sync every 15 min
-[functions."sync-jobtread"]
-  schedule = "*/15 * * * *"
