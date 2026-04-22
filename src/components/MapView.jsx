@@ -6,6 +6,31 @@ import { crewDayMiles, crewDayDriveMin } from '../lib/recommender'
 
 const JT_JOB_URL = (jobId) => `https://app.jobtread.com/jobs/${jobId}`
 
+// Task category → border color (Option C). Fill stays rep color (who owns it),
+// border tells you what kind of work (estimate vs production vs punch list).
+export const CATEGORY_COLORS = {
+  'Estimate':   '#4a9dcf', // NS blue — the most common scheduled task
+  'Production': '#5ea572', // green — actual work being performed
+  'Punch List': '#f59e0b', // amber — attention/close-out
+  'Job Start':  '#8b6bb5', // purple — kickoff moments
+  'Other':      '#6d675d', // mortar gray — fallback
+}
+
+export const CATEGORY_ORDER = ['Estimate', 'Production', 'Job Start', 'Punch List', 'Other']
+
+// Job status → chip color. Matches JT's lifecycle flow.
+const STATUS_COLORS = {
+  'Lead':      { bg: 'rgba(148, 163, 184, 0.18)', fg: '#cbd5e1' },
+  'Chasing':   { bg: 'rgba(251, 191, 36, 0.15)',  fg: '#fbbf24' },
+  'Set':       { bg: 'rgba(56, 189, 248, 0.15)',  fg: '#7dd3fc' },
+  'Met':       { bg: 'rgba(74, 157, 207, 0.18)',  fg: '#4a9dcf' },
+  'Sent':      { bg: 'rgba(94, 165, 114, 0.18)',  fg: '#7cc08e' },
+  'Nurture':   { bg: 'rgba(168, 162, 158, 0.15)', fg: '#a8a29e' },
+  'Won':       { bg: 'rgba(16, 185, 129, 0.2)',   fg: '#34d399' },
+  'Lost':      { bg: 'rgba(107, 114, 128, 0.2)',  fg: '#9ca3af' },
+  'Red Flag':  { bg: 'rgba(239, 68, 68, 0.2)',    fg: '#f87171' },
+}
+
 // Fit to a set of points when trigger changes
 function FitBounds({ points, trigger }) {
   const map = useMap()
@@ -40,14 +65,16 @@ function CenterAt({ lat, lng, zoom = 12, trigger }) {
   return null
 }
 
-// Teardrop pin — default mode
-function teardropIcon(color, label, isOrphan, dimmed) {
+// Teardrop pin — default mode. Border color encodes task category.
+function teardropIcon(color, label, isOrphan, dimmed, category) {
   const classes = ['dispatch-pin']
   if (isOrphan) classes.push('orphan')
   if (dimmed) classes.push('dimmed')
+  const borderColor = CATEGORY_COLORS[category] || CATEGORY_COLORS['Other']
+  // Inline border color via style — overrides the default border in .dispatch-pin
   return L.divIcon({
     className: '',
-    html: `<div class="${classes.join(' ')}" style="background:${color}"><span>${label || ''}</span></div>`,
+    html: `<div class="${classes.join(' ')}" style="background:${color};border-color:${borderColor};"><span>${label || ''}</span></div>`,
     iconSize: [30, 30],
     iconAnchor: [15, 30],
     popupAnchor: [0, -28],
@@ -95,19 +122,65 @@ function fitIcon() {
 
 function PopupCard({ task, rep, stopNum, stopTotal }) {
   const jtUrl = task.jt_job_id ? JT_JOB_URL(task.jt_job_id) : null
+  const category = task.task_category || 'Other'
+  const catColor = CATEGORY_COLORS[category] || CATEGORY_COLORS['Other']
+  const status = task.job_status
+  const statusStyle = status ? STATUS_COLORS[status] : null
+  const champion = task.project_champion
+  const sameAsSalesRep = champion && rep?.name && champion.trim() === rep.name.trim()
+
   return (
-    <div className="popup-card">
+    <div className="popup-card" style={{ minWidth: 240 }}>
       {stopNum != null && (
         <div className="text-[10px] uppercase tracking-[0.2em] text-ns-400 font-display mb-1">
           Stop {stopNum} of {stopTotal}
         </div>
       )}
-      <div className="font-bold text-mortar-300 text-sm mb-1 leading-tight">
+
+      {/* Category + Status chips row */}
+      <div className="flex items-center gap-1.5 flex-wrap mb-1.5">
+        <span
+          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-display font-bold uppercase tracking-wider"
+          style={{
+            background: `${catColor}22`,
+            color: catColor,
+            boxShadow: `inset 0 0 0 1px ${catColor}55`,
+          }}
+        >
+          <span
+            className="inline-block w-1.5 h-1.5 rounded-full"
+            style={{ background: catColor }}
+          />
+          {category}
+        </span>
+        {statusStyle && (
+          <span
+            className="inline-block px-1.5 py-0.5 rounded-full text-[9px] font-display font-bold uppercase tracking-wider"
+            style={{ background: statusStyle.bg, color: statusStyle.fg }}
+          >
+            {status}
+          </span>
+        )}
+        {task.job_type && (
+          <span className="text-[9px] uppercase tracking-wider text-mortar-500">
+            {task.job_type.replace(/\//g, ' / ')}
+          </span>
+        )}
+      </div>
+
+      <div className="font-bold text-mortar-300 text-sm mb-0.5 leading-tight">
         {task.job_name || 'Unnamed job'}
       </div>
+      {task.task_description && task.task_description !== task.job_name && (
+        <div className="text-mortar-400 text-[11px] mb-1 italic">
+          {task.task_description}
+        </div>
+      )}
       {task.job_address && (
         <div className="text-mortar-500 text-[11px] mb-2">{task.job_address}</div>
       )}
+
+      {/* Rep + time + champion */}
       <div className="flex items-center gap-2 pt-2 border-t border-mortar-800">
         {rep?.avatar_url ? (
           <img
@@ -128,12 +201,29 @@ function PopupCard({ task, rep, stopNum, stopTotal }) {
         <div className="flex-1 min-w-0">
           <div className="text-xs font-semibold text-mortar-300 truncate">
             {rep?.name || 'Unassigned'}
+            <span className="text-[9px] uppercase tracking-wider text-mortar-500 ml-1">· sales</span>
           </div>
           <div className="text-[10px] text-mortar-500">
             {formatTime(task.start_time) || 'no time'} · {task.duration_hrs || 8}h
           </div>
         </div>
       </div>
+
+      {/* Project Champion (only if different from sales rep) */}
+      {champion && !sameAsSalesRep && (
+        <div className="mt-1.5 pt-1.5 border-t border-mortar-800 flex items-center gap-2 text-[10px]">
+          <span className="uppercase tracking-wider text-mortar-500 font-display">Champion</span>
+          <span className="text-mortar-300 font-semibold truncate">{champion}</span>
+        </div>
+      )}
+
+      {/* Lead score */}
+      {task.lead_score && (
+        <div className="mt-1 text-[11px] text-amber-400">
+          {task.lead_score}
+        </div>
+      )}
+
       {jtUrl && (
         <a
           href={jtUrl}
@@ -556,7 +646,7 @@ export default function MapView({
             <Marker
               key={t.id}
               position={[t.lat, t.lng]}
-              icon={teardropIcon(color, initials, isOrphan, false)}
+              icon={teardropIcon(color, initials, isOrphan, false, t.task_category)}
               eventHandlers={{ click: () => onSelectTask?.(t.id) }}
               zIndexOffset={isSelected ? 2000 : 0}
             >
@@ -579,7 +669,7 @@ export default function MapView({
               <Marker
                 key={`dim-${t.id}`}
                 position={[t.lat, t.lng]}
-                icon={teardropIcon(color, initials, isOrphan, true)}
+                icon={teardropIcon(color, initials, isOrphan, true, t.task_category)}
                 eventHandlers={{ click: () => onSelectTask?.(t.id) }}
                 zIndexOffset={0}
               >

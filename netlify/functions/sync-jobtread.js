@@ -1,12 +1,36 @@
 // Scheduled every 15 min via netlify.toml. Also callable via POST /api/sync-jobtread.
-// Pulls JT scheduled tasks for the next 14 days, maps each task to its Sales Rep
-// (via job.customFieldValues filtered on the Sales Rep custom field),
-// and upserts to dispatch_tasks.
+// Pulls JT scheduled tasks for the next 14 days, maps each task to its Sales Rep,
+// and enriches with Job Type, Job Status, Project Champion, Lead Score.
+// Also derives a task_category (Estimate / Production / Punch List / Job Start /
+// Other) from the task name itself since JT has no structured task-type field.
 
 import { createClient } from '@supabase/supabase-js'
 
 const JT_URL = 'https://api.jobtread.com/pave'
-const SALES_REP_FIELD_ID = '22Nx8AjZSNmw'
+
+// Job-level custom field IDs we pull on every sync
+const FIELD_IDS = {
+  SALES_REP:        '22Nx8AjZSNmw',
+  JOB_TYPE:         '22Nx8AmPrjTd',
+  JOB_STATUS:       '22NzE5gAPktJ',
+  PROJECT_CHAMPION: '22Nx8AjgzaWT',
+  LEAD_SCORE:       '22NzWRqaNkMB',
+}
+
+// Derive a category bucket from the task name. JT has no structured task-type
+// field — task.name is the type (e.g., "Masonry Estimate", "Job Close Out/
+// Punch List", "Job Start"). We regex-classify once here so the client can
+// filter and color-code without re-doing it on every render.
+function deriveTaskCategory(name) {
+  if (!name) return 'Other'
+  const n = String(name).toLowerCase()
+  if (/\bestimate\b/.test(n))                                          return 'Estimate'
+  if (/\bjob start\b|\bstart[- ]?up\b|\bkick ?off\b/.test(n))          return 'Job Start'
+  if (/\bpunch ?list\b|\bclose ?out\b|\bfinal walk\b/.test(n))         return 'Punch List'
+  if (/\btuckpoint|\bmasonry\b|\bwaterproof|\bcaulk|\bseal|\brebuild|\bchimney|\bbrick|\bstone|\bconcrete\b/.test(n)) return 'Production'
+  if (/\bappt\b|\bappointment\b|\bmeeting\b/.test(n))                  return 'Estimate'
+  return 'Other'
+}
 
 export default async (req) => {
   const JT_API_KEY = process.env.JT_API_KEY
@@ -20,7 +44,6 @@ export default async (req) => {
 
   const sb = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } })
 
-  // Open sync log row
   const { data: logRow } = await sb.from('dispatch_sync_log').insert({ status: 'running' }).select().single()
   const logId = logRow?.id
   const finalize = async (status, rowsTouched, errorMsg) => {
@@ -34,16 +57,17 @@ export default async (req) => {
   }
 
   try {
-    // Date window: today through +14 days
     const today = new Date()
     const startISO = today.toISOString().slice(0, 10)
     const end = new Date(today); end.setDate(end.getDate() + 14)
     const endISO = end.toISOString().slice(0, 10)
 
-    // Paginate in case there are more than one page of tasks in window
+    // Build the `in` clause for all 5 field IDs in object form
+    const fieldIdValues = Object.values(FIELD_IDS).map(id => ({ value: id }))
+
     const allNodes = []
     let page = null
-    for (let i = 0; i < 20; i++) { // hard cap 20 pages of 100 = 2000 tasks
+    for (let i = 0; i < 20; i++) {
       const payload = {
         query: {
           $: { grantKey: JT_API_KEY },
@@ -76,8 +100,19 @@ export default async (req) => {
                   name: {},
                   location: { id: {}, address: {}, latitude: {}, longitude: {} },
                   customFieldValues: {
-                    $: { where: [['customField', 'id'], SALES_REP_FIELD_ID], size: 1 },
-                    nodes: { value: {} },
+                    $: {
+                      size: 10,
+                      where: {
+                        in: [
+                          { field: ['customField', 'id'] },
+                          fieldIdValues,
+                        ],
+                      },
+                    },
+                    nodes: {
+                      value: {},
+                      customField: { id: {} },
+                    },
                   },
                 },
               },
@@ -113,7 +148,7 @@ export default async (req) => {
     const repByName = new Map()
     ;(reps || []).forEach(r => repByName.set(normalizeName(r.name), r.id))
 
-    // Map JT task → dispatch_tasks row
+    // Build rows — extract all 5 custom field values by field id
     const rows = allNodes
       .filter(t => t.startDate)
       .map(t => {
@@ -121,9 +156,21 @@ export default async (req) => {
         const lat = isFiniteNonZero(loc.latitude) ? Number(loc.latitude) : null
         const lng = isFiniteNonZero(loc.longitude) ? Number(loc.longitude) : null
 
-        // Sales rep from job's custom field value
-        const repValue = t.job?.customFieldValues?.nodes?.[0]?.value || null
-        const crew_id = repValue ? (repByName.get(normalizeName(repValue)) || null) : null
+        // Index field values by field id so we can pluck each by name
+        const cfvById = new Map()
+        ;(t.job?.customFieldValues?.nodes || []).forEach(cfv => {
+          const id = cfv?.customField?.id
+          if (id) cfvById.set(id, cfv.value ?? null)
+        })
+
+        const salesRep        = cfvById.get(FIELD_IDS.SALES_REP)        || null
+        const jobType         = cfvById.get(FIELD_IDS.JOB_TYPE)         || null
+        const jobStatus       = cfvById.get(FIELD_IDS.JOB_STATUS)       || null
+        const projectChampion = cfvById.get(FIELD_IDS.PROJECT_CHAMPION) || null
+        const leadScore       = cfvById.get(FIELD_IDS.LEAD_SCORE)       || null
+
+        const crew_id = salesRep ? (repByName.get(normalizeName(salesRep)) || null) : null
+        const task_category = deriveTaskCategory(t.name)
 
         return {
           id: `jt-${t.id}`,
@@ -138,12 +185,17 @@ export default async (req) => {
           crew_id,
           status: t.completed ? 'completed' : 'scheduled',
           notes: t.description || null,
+          task_description: t.name || null,          // the actual task name, e.g. "Masonry Estimate"
+          task_category,                              // Estimate / Production / Punch List / Job Start / Other
+          job_type: jobType,
+          job_status: jobStatus,
+          project_champion: projectChampion,
+          lead_score: leadScore,
           last_synced_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         }
       })
 
-    // Upsert in batches of 200
     let touched = 0
     for (let i = 0; i < rows.length; i += 200) {
       const batch = rows.slice(i, i + 200)
@@ -153,8 +205,18 @@ export default async (req) => {
     }
 
     const unassigned = rows.filter(r => !r.crew_id).length
+    const categoryBreakdown = rows.reduce((acc, r) => {
+      acc[r.task_category] = (acc[r.task_category] || 0) + 1
+      return acc
+    }, {})
+
     await finalize('ok', touched, null)
-    return json({ rows_touched: touched, pulled: allNodes.length, unassigned }, 200)
+    return json({
+      rows_touched: touched,
+      pulled: allNodes.length,
+      unassigned,
+      categories: categoryBreakdown,
+    }, 200)
   } catch (err) {
     await finalize('error', 0, err.message)
     return json({ error: err.message }, 500)

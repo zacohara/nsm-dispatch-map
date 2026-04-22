@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useDispatchData, triggerSync, reassignTask } from './lib/data'
 import { todayISO, fmtDate, addDays } from './lib/utils'
 import { supabase } from './lib/supabase'
@@ -8,6 +8,7 @@ import MapView from './components/MapView'
 import HealthPanel from './components/HealthPanel'
 import FitPanel from './components/FitPanel'
 import SuggestPanel from './components/SuggestPanel'
+import FilterBar from './components/FilterBar'
 
 export default function App() {
   const [date, setDate] = useState(todayISO())
@@ -19,8 +20,32 @@ export default function App() {
   const [fitResult, setFitResult] = useState(null)
   const [previewSuggestion, setPreviewSuggestion] = useState(null)
   const [stripTick, setStripTick] = useState(0)
+  // Filter state — empty set means "show all". Adding a category to the set
+  // makes that the active filter (additive — can pick multiple).
+  const [activeCategories, setActiveCategories] = useState(() => new Set())
 
   const { crews, tasks, syncInfo, loading, error, reload } = useDispatchData(date)
+
+  // Apply the category filter. Empty set → all tasks visible.
+  const filteredTasks = useMemo(() => {
+    if (activeCategories.size === 0) return tasks
+    return tasks.filter(t => activeCategories.has(t.task_category || 'Other'))
+  }, [tasks, activeCategories])
+
+  const toggleCategory = useCallback((cat) => {
+    setActiveCategories(prev => {
+      const next = new Set(prev)
+      if (next.has(cat)) next.delete(cat)
+      else next.add(cat)
+      return next
+    })
+    // Clear selection — selected items may be filtered out
+    setSelectedTaskId(null)
+  }, [])
+
+  const resetCategories = useCallback(() => {
+    setActiveCategories(new Set())
+  }, [])
 
   // Wrap setDate to clear rep/task selections when switching days
   const handleDateChange = useCallback((next) => {
@@ -115,7 +140,11 @@ export default function App() {
         <div className="text-right">
           <div className="text-[9px] uppercase tracking-[0.25em] text-mortar-500 font-display">Today</div>
           <div className="text-sm font-semibold text-mortar-300">
-            {loading ? 'Loading…' : `${fmtDate(date, 'long')} · ${tasks.length} task${tasks.length === 1 ? '' : 's'}`}
+            {loading
+              ? 'Loading…'
+              : activeCategories.size > 0
+                ? `${fmtDate(date, 'long')} · ${filteredTasks.length} of ${tasks.length} task${tasks.length === 1 ? '' : 's'}`
+                : `${fmtDate(date, 'long')} · ${tasks.length} task${tasks.length === 1 ? '' : 's'}`}
           </div>
         </div>
       </header>
@@ -124,12 +153,20 @@ export default function App() {
       {/* Day strip */}
       <DayStrip date={date} onChange={handleDateChange} taskCountsByDate={taskCountsByDate} />
 
+      {/* Category filter chips — only appears if today has tasks with categories */}
+      <FilterBar
+        tasks={tasks}
+        activeCategories={activeCategories}
+        onToggle={toggleCategory}
+        onReset={resetCategories}
+      />
+
       {/* Main grid */}
       <div className="flex-1 flex overflow-hidden">
         <aside className="w-[320px] flex-shrink-0 border-r border-mortar-800 bg-mortar-950">
           <LeftPanel
             crews={crews}
-            tasks={tasks}
+            tasks={filteredTasks}
             selectedCrewId={selectedCrewId}
             onSelectCrew={setSelectedCrewId}
             selectedTaskId={selectedTaskId}
@@ -141,7 +178,7 @@ export default function App() {
         <main className="flex-1 relative">
           <MapView
             crews={crews}
-            tasks={tasks}
+            tasks={filteredTasks}
             selectedCrewId={selectedCrewId}
             selectedTaskId={selectedTaskId}
             onSelectTask={setSelectedTaskId}
