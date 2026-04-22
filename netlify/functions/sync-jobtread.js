@@ -189,5 +189,3 @@ function computeDuration(t) {
   if (isNaN(sh) || isNaN(eh)) return null
   return Math.max(0.5, (eh * 60 + em - sh * 60 - sm) / 60)
 }
-
-export const config = { path: '/api/sync-jobtread' }
