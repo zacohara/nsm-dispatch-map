@@ -44,38 +44,41 @@ export default async (req) => {
     const allNodes = []
     let page = null
     for (let i = 0; i < 10; i++) { // hard cap 10 pages
-      const query = {
-        organization: {
-          $: { id: JT_ORG_ID },
-          tasks: {
-            $: {
-              size: 200,
-              ...(page ? { page } : {}),
-              where: {
-                and: [
-                  ['isToDo', false],
-                  ['startDate', '>=', startISO],
-                  ['startDate', '<=', endISO],
-                ],
+      const payload = {
+        query: {
+          $: { grantKey: JT_API_KEY },
+          organization: {
+            $: { id: JT_ORG_ID },
+            tasks: {
+              $: {
+                size: 200,
+                ...(page ? { page } : {}),
+                where: {
+                  and: [
+                    ['isToDo', false],
+                    ['startDate', '>=', startISO],
+                    ['startDate', '<=', endISO],
+                  ],
+                },
               },
-            },
-            nextPage: {},
-            nodes: {
-              id: {},
-              name: {},
-              startDate: {},
-              startTime: {},
-              endDate: {},
-              endTime: {},
-              completed: {},
-              description: {},
-              job: {
+              nextPage: {},
+              nodes: {
                 id: {},
                 name: {},
-                location: { id: {}, address: {}, latitude: {}, longitude: {} },
-                customFieldValues: {
-                  $: { where: [['customField', 'id'], SALES_REP_FIELD_ID], size: 1 },
-                  nodes: { value: {} },
+                startDate: {},
+                startTime: {},
+                endDate: {},
+                endTime: {},
+                completed: {},
+                description: {},
+                job: {
+                  id: {},
+                  name: {},
+                  location: { id: {}, address: {}, latitude: {}, longitude: {} },
+                  customFieldValues: {
+                    $: { where: [['customField', 'id'], SALES_REP_FIELD_ID], size: 1 },
+                    nodes: { value: {} },
+                  },
                 },
               },
             },
@@ -85,8 +88,8 @@ export default async (req) => {
 
       const resp = await fetch(JT_URL, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${JT_API_KEY}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(query),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
       })
       if (!resp.ok) {
         const errText = await resp.text()
