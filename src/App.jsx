@@ -134,6 +134,8 @@ export default function App() {
             onSelectCrew={setSelectedCrewId}
             selectedTaskId={selectedTaskId}
             onSelectTask={setSelectedTaskId}
+            fitResult={fitResult}
+            onExitFitMode={() => { setFitResult(null); setPreviewSuggestion(null) }}
           />
         </aside>
         <main className="flex-1 relative">

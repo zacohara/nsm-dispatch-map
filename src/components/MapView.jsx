@@ -28,6 +28,18 @@ function PanToSelected({ lat, lng, trigger }) {
   return null
 }
 
+// Center on a single point at a fixed zoom — used for fit mode so the lead
+// address stays the visual focus rather than being lost in wide bounds.
+function CenterAt({ lat, lng, zoom = 12, trigger }) {
+  const map = useMap()
+  useEffect(() => {
+    if (lat == null || lng == null) return
+    map.setView([lat, lng], zoom, { animate: true, duration: 0.6 })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trigger])
+  return null
+}
+
 // Teardrop pin — default mode
 function teardropIcon(color, label, isOrphan, dimmed) {
   const classes = ['dispatch-pin']
@@ -593,7 +605,17 @@ export default function MapView({
           </Marker>
         )}
 
-        <FitBounds points={boundsPoints} trigger={boundsTrigger} />
+        {/* Fit mode → center tightly on the lead. Other modes → fit bounds. */}
+        {isFitMode ? (
+          <CenterAt
+            lat={fitResult.lat}
+            lng={fitResult.lng}
+            zoom={12}
+            trigger={`fit-${fitResult.lat}-${fitResult.lng}`}
+          />
+        ) : (
+          <FitBounds points={boundsPoints} trigger={boundsTrigger} />
+        )}
         <PanToSelected lat={selectedTaskCoords.lat} lng={selectedTaskCoords.lng} trigger={panTrigger} />
       </MapContainer>
     </div>
