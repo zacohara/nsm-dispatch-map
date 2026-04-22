@@ -1,10 +1,9 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { suggestSlotsAt } from '../lib/data'
-import { formatTime } from '../lib/utils'
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN
 const MAPBOX_ENDPOINT = 'https://api.mapbox.com/geocoding/v5/mapbox.places'
-const PROXIMITY = '-87.6298,41.8781' // Chicago CoG
+const PROXIMITY = '-87.6298,41.8781'
 
 function useDebouncedValue(value, ms) {
   const [v, setV] = useState(value)
@@ -34,7 +33,7 @@ async function mapboxSuggest(query) {
   }))
 }
 
-// Tiny row of dots showing "Home → stop → NEW → stop → Home" for a suggestion
+// Compact route chain: 🏠 ① ② NEW ③ 🏠
 function RouteChain({ suggestion, repColor, compact }) {
   const stops = suggestion.day_stops || []
   const insertIdx = suggestion.insert_index ?? stops.length
@@ -43,15 +42,13 @@ function RouteChain({ suggestion, repColor, compact }) {
   const lineLen = compact ? 4 : 6
 
   const items = []
-  // Home start
-  items.push({ type: 'home', label: '🏠' })
+  items.push({ type: 'home' })
   for (let i = 0; i < stops.length; i++) {
     if (i === insertIdx) items.push({ type: 'new', label: 'NEW' })
     items.push({ type: 'stop', label: String(i + 1) })
   }
   if (insertIdx >= stops.length) items.push({ type: 'new', label: 'NEW' })
-  // Home end
-  items.push({ type: 'home', label: '🏠' })
+  items.push({ type: 'home' })
 
   return (
     <div className="flex items-center flex-wrap gap-0">
@@ -67,20 +64,14 @@ function RouteChain({ suggestion, repColor, compact }) {
           {it.type === 'stop' && (
             <span
               className="inline-flex items-center justify-center rounded-full flex-shrink-0 text-white font-bold"
-              style={{
-                width: dotSize,
-                height: dotSize,
-                background: repColor,
-                fontSize: compact ? 7 : 8,
-              }}
+              style={{ width: dotSize, height: dotSize, background: repColor, fontSize: compact ? 7 : 8 }}
             >{it.label}</span>
           )}
           {it.type === 'new' && (
             <span
               className="inline-flex items-center justify-center rounded-full flex-shrink-0 text-white font-display font-bold"
               style={{
-                width: newSize,
-                height: newSize,
+                width: newSize, height: newSize,
                 background: '#4a9dcf',
                 fontSize: compact ? 7 : 9,
                 letterSpacing: '0.02em',
@@ -92,11 +83,9 @@ function RouteChain({ suggestion, repColor, compact }) {
             <span
               className="inline-block flex-shrink-0"
               style={{
-                width: lineLen,
-                height: 1,
+                width: lineLen, height: 1,
                 background: items[i].type === 'new' || items[i + 1].type === 'new'
-                  ? '#4a9dcf'
-                  : `${repColor}66`,
+                  ? '#4a9dcf' : `${repColor}66`,
               }}
             />
           )}
@@ -126,10 +115,19 @@ export default function FitPanel({
   const inputRef = useRef(null)
   const wrapRef = useRef(null)
 
+  // When a result is locked in, the input gets replaced with a pill showing
+  // the selected address. The typing path is disabled entirely until clear.
+  const isLocked = Boolean(currentResult)
+
   const debounced = useDebouncedValue(query, 220)
 
-  // Mapbox suggestions
+  // Mapbox suggestions — ONLY while NOT locked
   useEffect(() => {
+    if (isLocked) {
+      setSuggestions([])
+      setDropdownOpen(false)
+      return
+    }
     let cancelled = false
     if (!debounced || debounced.trim().length < 3) {
       setSuggestions([]); setDropdownOpen(false); return
@@ -146,9 +144,9 @@ export default function FitPanel({
         setSuggestions([]); setDropdownOpen(false)
       })
     return () => { cancelled = true }
-  }, [debounced])
+  }, [debounced, isLocked])
 
-  // Click outside closes autocomplete
+  // Close dropdown on outside click
   useEffect(() => {
     const onClick = (e) => {
       if (wrapRef.current && !wrapRef.current.contains(e.target)) {
@@ -159,7 +157,6 @@ export default function FitPanel({
     return () => document.removeEventListener('mousedown', onClick)
   }, [])
 
-  // When drawer closes or results change, clear preview
   useEffect(() => {
     if (!resultsOpen) {
       setHoveredIdx(-1)
@@ -182,10 +179,12 @@ export default function FitPanel({
         onFlash?.('Could not find that address', 'error')
         return
       }
-      onResult?.(r)
+      onResult?.(r)          // → parent sets currentResult → isLocked becomes true
       setResultsOpen(true)
-      setQuery(picked.address)
-      onSelectRep?.(null) // clear any rep selection so fit mode is clean
+      // Don't write the address back to query — we'll render a pill instead
+      setQuery('')
+      setSuggestions([])
+      onSelectRep?.(null)
     } catch (err) {
       onFlash?.(`Fit search failed: ${err.message}`, 'error')
     } finally {
@@ -194,6 +193,7 @@ export default function FitPanel({
   }, [duration, onFlash, onResult, onSelectRep])
 
   const handleKeyDown = (e) => {
+    if (isLocked) return
     if (!dropdownOpen || suggestions.length === 0) {
       if (e.key === 'Enter' && query.trim().length >= 3) {
         e.preventDefault()
@@ -224,7 +224,8 @@ export default function FitPanel({
     setHoveredIdx(-1)
     onClear?.()
     onPreviewSuggestion?.(null)
-    inputRef.current?.focus()
+    // Give React a tick to unlock, then refocus
+    setTimeout(() => inputRef.current?.focus(), 0)
   }
 
   const handleHoverSuggestion = (i, s) => {
@@ -236,7 +237,6 @@ export default function FitPanel({
     onPreviewSuggestion?.(null)
   }
 
-  // Click a suggestion → select that rep, close preview mode
   const handleClickSuggestion = (s) => {
     onPreviewSuggestion?.(null)
     onSelectRep?.(s.rep_id)
@@ -245,10 +245,13 @@ export default function FitPanel({
 
   const fitSuggestions = currentResult?.suggestions || []
 
+  // Short display for the locked address
+  const lockedAddressShort = currentResult?.address?.split(',').slice(0, 2).join(',')
+
   return (
     <div className="border-t border-mortar-800 bg-mortar-900/80 relative" ref={wrapRef}>
-      {/* Autocomplete dropdown */}
-      {dropdownOpen && suggestions.length > 0 && (
+      {/* Autocomplete dropdown — ONLY when not locked */}
+      {!isLocked && dropdownOpen && suggestions.length > 0 && (
         <div className="autocomplete-dropdown">
           {suggestions.map((s, i) => (
             <div
@@ -270,43 +273,28 @@ export default function FitPanel({
         </div>
       )}
 
-      {/* Input bar */}
+      {/* Input bar — swaps to a locked-address pill when a result is active */}
       <div className="px-3 py-2.5 flex items-center gap-2">
-        <div className="flex items-center gap-2 flex-1 min-w-0 relative">
-          <svg className="w-4 h-4 text-ns-400 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
-            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/>
-          </svg>
-          <input
-            ref={inputRef}
-            type="text"
-            value={query}
-            onChange={e => { setQuery(e.target.value); setResultsOpen(false) }}
-            onKeyDown={handleKeyDown}
-            onFocus={() => { if (suggestions.length) setDropdownOpen(true) }}
-            placeholder="Fit a lead — start typing an address to find the best rep for it"
-            className="flex-1 min-w-0 bg-mortar-950 border border-mortar-800 rounded px-3 py-1.5 text-xs text-mortar-300 placeholder:text-mortar-500 focus:outline-none focus:border-ns-400"
-            autoComplete="off"
-            spellCheck={false}
-          />
-          <div className="flex items-center gap-1 text-[10px] text-mortar-500">
-            <span className="uppercase tracking-wider">hrs</span>
-            <select
-              value={duration}
-              onChange={e => setDuration(Number(e.target.value))}
-              className="bg-mortar-950 border border-mortar-800 rounded px-1.5 py-1 text-xs text-mortar-300 focus:outline-none focus:border-ns-400"
-            >
-              {[1, 2, 3, 4, 6, 8].map(h => <option key={h} value={h}>{h}</option>)}
-            </select>
-          </div>
-        </div>
-        {searching && <span className="text-[10px] text-mortar-500">Finding…</span>}
-        {currentResult && !searching && (
-          <>
+        {isLocked ? (
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-1 min-w-0 bg-ns-900/40 border border-ns-700 rounded px-3 py-1.5">
+              <svg className="w-4 h-4 text-ns-400 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/>
+              </svg>
+              <span className="text-[10px] uppercase tracking-[0.2em] text-ns-400 font-display flex-shrink-0">Fit lead</span>
+              <span className="text-xs text-cream font-semibold truncate">{lockedAddressShort}</span>
+            </div>
+            <div className="flex items-center gap-1 text-[10px] text-mortar-500 flex-shrink-0">
+              <span className="uppercase tracking-wider">hrs</span>
+              <div className="bg-mortar-950 border border-mortar-800 rounded px-2 py-1 text-xs text-mortar-300">
+                {duration}
+              </div>
+            </div>
             {!resultsOpen && fitSuggestions.length > 0 && (
               <button
                 type="button"
                 onClick={() => setResultsOpen(true)}
-                className="px-2.5 py-1.5 text-[11px] rounded bg-ns-500 hover:bg-ns-400 text-white font-semibold"
+                className="px-2.5 py-1.5 text-[11px] rounded bg-ns-500 hover:bg-ns-400 text-white font-semibold flex-shrink-0"
               >
                 Show {fitSuggestions.length} slot{fitSuggestions.length === 1 ? '' : 's'}
               </button>
@@ -314,14 +302,48 @@ export default function FitPanel({
             <button
               type="button"
               onClick={handleClear}
-              className="px-2 py-1.5 text-xs rounded border border-mortar-700 text-mortar-500 hover:text-mortar-300 hover:border-mortar-500"
-              title="Clear"
-            >✕</button>
+              className="px-2.5 py-1.5 text-xs rounded border border-mortar-700 text-mortar-500 hover:text-mortar-300 hover:border-mortar-500 flex items-center gap-1 flex-shrink-0"
+              title="Clear and search new address"
+            >
+              <span>New address</span>
+              <span>✕</span>
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center gap-2 flex-1 min-w-0 relative">
+              <svg className="w-4 h-4 text-ns-400 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/>
+              </svg>
+              <input
+                ref={inputRef}
+                type="text"
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                onKeyDown={handleKeyDown}
+                onFocus={() => { if (suggestions.length) setDropdownOpen(true) }}
+                placeholder="Fit a lead — start typing an address to find the best rep for it"
+                className="flex-1 min-w-0 bg-mortar-950 border border-mortar-800 rounded px-3 py-1.5 text-xs text-mortar-300 placeholder:text-mortar-500 focus:outline-none focus:border-ns-400"
+                autoComplete="off"
+                spellCheck={false}
+              />
+              <div className="flex items-center gap-1 text-[10px] text-mortar-500">
+                <span className="uppercase tracking-wider">hrs</span>
+                <select
+                  value={duration}
+                  onChange={e => setDuration(Number(e.target.value))}
+                  className="bg-mortar-950 border border-mortar-800 rounded px-1.5 py-1 text-xs text-mortar-300 focus:outline-none focus:border-ns-400"
+                >
+                  {[1, 2, 3, 4, 6, 8].map(h => <option key={h} value={h}>{h}</option>)}
+                </select>
+              </div>
+            </div>
+            {searching && <span className="text-[10px] text-mortar-500">Finding…</span>}
           </>
         )}
       </div>
 
-      {/* Results drawer — compact, hoverable rows */}
+      {/* Results drawer */}
       {resultsOpen && currentResult && (
         <div className="absolute bottom-full left-0 right-0 bg-mortar-900 border-t border-ns-600 shadow-[0_-8px_24px_rgba(0,0,0,0.5)] max-h-[40vh] overflow-y-auto z-20">
           <div className="px-3 py-2 border-b border-mortar-800 flex items-center justify-between sticky top-0 bg-mortar-900 z-10">
@@ -394,9 +416,7 @@ export default function FitPanel({
                         <div className="text-sm font-bold leading-none" style={{ color: s.added_miles < 2 ? '#10b981' : s.added_miles < 10 ? '#f59e0b' : '#ef4444' }}>
                           +{s.added_miles}mi
                         </div>
-                        <div className="text-[10px] text-mortar-500 mt-0.5">
-                          +{s.added_drive_min}m
-                        </div>
+                        <div className="text-[10px] text-mortar-500 mt-0.5">+{s.added_drive_min}m</div>
                       </div>
                     </div>
                   </li>
