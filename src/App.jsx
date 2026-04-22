@@ -17,7 +17,8 @@ export default function App() {
   const [toast, setToast] = useState(null)
   const [taskCountsByDate, setTaskCountsByDate] = useState({})
   const [fitResult, setFitResult] = useState(null)
-  const [stripTick, setStripTick] = useState(0) // bump to force count refresh
+  const [previewSuggestion, setPreviewSuggestion] = useState(null)
+  const [stripTick, setStripTick] = useState(0)
 
   const { crews, tasks, syncInfo, loading, error, reload } = useDispatchData(date)
 
@@ -47,20 +48,20 @@ export default function App() {
       })
   }, [syncInfo?.started_at, stripTick])
 
-  // Global ESC key — clears fit pin → selected task → selected rep, in order
+  // Global ESC — clears preview → fit pin → selected task → selected rep
   useEffect(() => {
     const onKey = (e) => {
       if (e.key !== 'Escape') return
-      // Don't hijack ESC if user is in an input/textarea
       const tag = e.target?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      if (previewSuggestion) { setPreviewSuggestion(null); return }
       if (fitResult) { setFitResult(null); return }
       if (selectedTaskId) { setSelectedTaskId(null); return }
       if (selectedCrewId) { setSelectedCrewId(null); return }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [fitResult, selectedTaskId, selectedCrewId])
+  }, [previewSuggestion, fitResult, selectedTaskId, selectedCrewId])
 
   const flash = (msg, type = 'info') => {
     setToast({ msg, type })
@@ -143,6 +144,7 @@ export default function App() {
             selectedTaskId={selectedTaskId}
             onSelectTask={setSelectedTaskId}
             fitResult={fitResult}
+            previewSuggestion={previewSuggestion}
           />
           {error && (
             <div className="absolute top-3 left-1/2 -translate-x-1/2 px-3 py-2 bg-red-900/80 text-red-100 text-xs rounded border border-red-700 z-[600]">
@@ -165,8 +167,10 @@ export default function App() {
         crews={crews}
         onResult={setFitResult}
         currentResult={fitResult}
-        onClear={() => setFitResult(null)}
+        onClear={() => { setFitResult(null); setPreviewSuggestion(null) }}
         onFlash={flash}
+        onPreviewSuggestion={setPreviewSuggestion}
+        onSelectRep={setSelectedCrewId}
       />
       <HealthPanel
         crews={crews}

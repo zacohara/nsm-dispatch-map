@@ -1,14 +1,11 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { suggestSlotsAt } from '../lib/data'
+import { formatTime } from '../lib/utils'
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN
 const MAPBOX_ENDPOINT = 'https://api.mapbox.com/geocoding/v5/mapbox.places'
+const PROXIMITY = '-87.6298,41.8781' // Chicago CoG
 
-// Bias results to NSM's four metro areas (Chicago, Milwaukee, Dallas, Indianapolis)
-// proximity is a single point — Chicago is the center of gravity for NSM
-const PROXIMITY = '-87.6298,41.8781'
-
-// Debounce helper
 function useDebouncedValue(value, ms) {
   const [v, setV] = useState(value)
   useEffect(() => {
@@ -22,11 +19,8 @@ async function mapboxSuggest(query) {
   if (!MAPBOX_TOKEN) return []
   const url = `${MAPBOX_ENDPOINT}/${encodeURIComponent(query)}.json`
     + `?access_token=${MAPBOX_TOKEN}`
-    + `&autocomplete=true`
-    + `&country=us`
-    + `&limit=5`
-    + `&proximity=${PROXIMITY}`
-    + `&types=address,poi`
+    + `&autocomplete=true&country=us&limit=5`
+    + `&proximity=${PROXIMITY}&types=address,poi`
   const r = await fetch(url)
   if (!r.ok) throw new Error(`Mapbox ${r.status}`)
   const data = await r.json()
@@ -40,7 +34,87 @@ async function mapboxSuggest(query) {
   }))
 }
 
-export default function FitPanel({ crews, onResult, currentResult, onClear, onFlash }) {
+// Tiny row of dots showing "Home → stop → NEW → stop → Home" for a suggestion
+function RouteChain({ suggestion, repColor, compact }) {
+  const stops = suggestion.day_stops || []
+  const insertIdx = suggestion.insert_index ?? stops.length
+  const dotSize = compact ? 8 : 11
+  const newSize = compact ? 14 : 18
+  const lineLen = compact ? 4 : 6
+
+  const items = []
+  // Home start
+  items.push({ type: 'home', label: '🏠' })
+  for (let i = 0; i < stops.length; i++) {
+    if (i === insertIdx) items.push({ type: 'new', label: 'NEW' })
+    items.push({ type: 'stop', label: String(i + 1) })
+  }
+  if (insertIdx >= stops.length) items.push({ type: 'new', label: 'NEW' })
+  // Home end
+  items.push({ type: 'home', label: '🏠' })
+
+  return (
+    <div className="flex items-center flex-wrap gap-0">
+      {items.map((it, i) => (
+        <span key={i} className="flex items-center">
+          {it.type === 'home' && (
+            <span
+              className="inline-flex items-center justify-center flex-shrink-0"
+              style={{ fontSize: compact ? 10 : 12, width: dotSize + 4, height: dotSize + 4 }}
+              title="Home"
+            >🏠</span>
+          )}
+          {it.type === 'stop' && (
+            <span
+              className="inline-flex items-center justify-center rounded-full flex-shrink-0 text-white font-bold"
+              style={{
+                width: dotSize,
+                height: dotSize,
+                background: repColor,
+                fontSize: compact ? 7 : 8,
+              }}
+            >{it.label}</span>
+          )}
+          {it.type === 'new' && (
+            <span
+              className="inline-flex items-center justify-center rounded-full flex-shrink-0 text-white font-display font-bold"
+              style={{
+                width: newSize,
+                height: newSize,
+                background: '#4a9dcf',
+                fontSize: compact ? 7 : 9,
+                letterSpacing: '0.02em',
+                boxShadow: '0 0 0 1.5px #4a9dcf33, 0 1px 3px rgba(0,0,0,0.4)',
+              }}
+            >{it.label}</span>
+          )}
+          {i < items.length - 1 && (
+            <span
+              className="inline-block flex-shrink-0"
+              style={{
+                width: lineLen,
+                height: 1,
+                background: items[i].type === 'new' || items[i + 1].type === 'new'
+                  ? '#4a9dcf'
+                  : `${repColor}66`,
+              }}
+            />
+          )}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+export default function FitPanel({
+  crews,
+  onResult,
+  currentResult,
+  onClear,
+  onFlash,
+  onPreviewSuggestion,
+  onSelectRep,
+}) {
   const [query, setQuery] = useState('')
   const [duration, setDuration] = useState(2)
   const [searching, setSearching] = useState(false)
@@ -48,18 +122,17 @@ export default function FitPanel({ crews, onResult, currentResult, onClear, onFl
   const [activeIdx, setActiveIdx] = useState(-1)
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [resultsOpen, setResultsOpen] = useState(false)
+  const [hoveredIdx, setHoveredIdx] = useState(-1)
   const inputRef = useRef(null)
   const wrapRef = useRef(null)
 
   const debounced = useDebouncedValue(query, 220)
 
-  // Fetch Mapbox suggestions when debounced query changes
+  // Mapbox suggestions
   useEffect(() => {
     let cancelled = false
     if (!debounced || debounced.trim().length < 3) {
-      setSuggestions([])
-      setDropdownOpen(false)
-      return
+      setSuggestions([]); setDropdownOpen(false); return
     }
     mapboxSuggest(debounced.trim())
       .then(results => {
@@ -70,13 +143,12 @@ export default function FitPanel({ crews, onResult, currentResult, onClear, onFl
       })
       .catch(() => {
         if (cancelled) return
-        setSuggestions([])
-        setDropdownOpen(false)
+        setSuggestions([]); setDropdownOpen(false)
       })
     return () => { cancelled = true }
   }, [debounced])
 
-  // Close dropdown when clicking outside
+  // Click outside closes autocomplete
   useEffect(() => {
     const onClick = (e) => {
       if (wrapRef.current && !wrapRef.current.contains(e.target)) {
@@ -86,6 +158,14 @@ export default function FitPanel({ crews, onResult, currentResult, onClear, onFl
     document.addEventListener('mousedown', onClick)
     return () => document.removeEventListener('mousedown', onClick)
   }, [])
+
+  // When drawer closes or results change, clear preview
+  useEffect(() => {
+    if (!resultsOpen) {
+      setHoveredIdx(-1)
+      onPreviewSuggestion?.(null)
+    }
+  }, [resultsOpen, onPreviewSuggestion])
 
   const runSearch = useCallback(async (picked) => {
     if (!picked) return
@@ -105,12 +185,13 @@ export default function FitPanel({ crews, onResult, currentResult, onClear, onFl
       onResult?.(r)
       setResultsOpen(true)
       setQuery(picked.address)
+      onSelectRep?.(null) // clear any rep selection so fit mode is clean
     } catch (err) {
       onFlash?.(`Fit search failed: ${err.message}`, 'error')
     } finally {
       setSearching(false)
     }
-  }, [duration, onFlash, onResult])
+  }, [duration, onFlash, onResult, onSelectRep])
 
   const handleKeyDown = (e) => {
     if (!dropdownOpen || suggestions.length === 0) {
@@ -140,8 +221,26 @@ export default function FitPanel({ crews, onResult, currentResult, onClear, onFl
     setSuggestions([])
     setDropdownOpen(false)
     setResultsOpen(false)
+    setHoveredIdx(-1)
     onClear?.()
+    onPreviewSuggestion?.(null)
     inputRef.current?.focus()
+  }
+
+  const handleHoverSuggestion = (i, s) => {
+    setHoveredIdx(i)
+    onPreviewSuggestion?.(s)
+  }
+  const handleUnhoverSuggestion = () => {
+    setHoveredIdx(-1)
+    onPreviewSuggestion?.(null)
+  }
+
+  // Click a suggestion → select that rep, close preview mode
+  const handleClickSuggestion = (s) => {
+    onPreviewSuggestion?.(null)
+    onSelectRep?.(s.rep_id)
+    setResultsOpen(false)
   }
 
   const fitSuggestions = currentResult?.suggestions || []
@@ -184,7 +283,7 @@ export default function FitPanel({ crews, onResult, currentResult, onClear, onFl
             onChange={e => { setQuery(e.target.value); setResultsOpen(false) }}
             onKeyDown={handleKeyDown}
             onFocus={() => { if (suggestions.length) setDropdownOpen(true) }}
-            placeholder="Fit a lead — start typing an address to find the 5 best slots in the next 4 days"
+            placeholder="Fit a lead — start typing an address to find the best rep for it"
             className="flex-1 min-w-0 bg-mortar-950 border border-mortar-800 rounded px-3 py-1.5 text-xs text-mortar-300 placeholder:text-mortar-500 focus:outline-none focus:border-ns-400"
             autoComplete="off"
             spellCheck={false}
@@ -202,28 +301,41 @@ export default function FitPanel({ crews, onResult, currentResult, onClear, onFl
         </div>
         {searching && <span className="text-[10px] text-mortar-500">Finding…</span>}
         {currentResult && !searching && (
-          <button
-            type="button"
-            onClick={handleClear}
-            className="px-2 py-1.5 text-xs rounded border border-mortar-700 text-mortar-500 hover:text-mortar-300 hover:border-mortar-500"
-            title="Clear"
-          >✕</button>
+          <>
+            {!resultsOpen && fitSuggestions.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setResultsOpen(true)}
+                className="px-2.5 py-1.5 text-[11px] rounded bg-ns-500 hover:bg-ns-400 text-white font-semibold"
+              >
+                Show {fitSuggestions.length} slot{fitSuggestions.length === 1 ? '' : 's'}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={handleClear}
+              className="px-2 py-1.5 text-xs rounded border border-mortar-700 text-mortar-500 hover:text-mortar-300 hover:border-mortar-500"
+              title="Clear"
+            >✕</button>
+          </>
         )}
       </div>
 
-      {/* Results drawer */}
+      {/* Results drawer — compact, hoverable rows */}
       {resultsOpen && currentResult && (
-        <div className="absolute bottom-full left-0 right-0 bg-mortar-900 border-t border-ns-800 shadow-[0_-8px_24px_rgba(0,0,0,0.4)] max-h-[50vh] overflow-y-auto z-20">
-          <div className="px-3 py-2 border-b border-mortar-800 flex items-center justify-between sticky top-0 bg-mortar-900">
-            <div>
-              <div className="text-[10px] uppercase tracking-wider text-ns-400">Recommended slots</div>
-              <div className="text-xs text-mortar-300 truncate max-w-md">{currentResult.address}</div>
+        <div className="absolute bottom-full left-0 right-0 bg-mortar-900 border-t border-ns-600 shadow-[0_-8px_24px_rgba(0,0,0,0.5)] max-h-[40vh] overflow-y-auto z-20">
+          <div className="px-3 py-2 border-b border-mortar-800 flex items-center justify-between sticky top-0 bg-mortar-900 z-10">
+            <div className="flex-1 min-w-0">
+              <div className="text-[10px] uppercase tracking-wider text-ns-400 font-display">Recommended slots</div>
+              <div className="text-xs text-mortar-300 truncate">{currentResult.address}</div>
             </div>
+            <div className="text-[10px] text-mortar-500 mx-2">Hover to preview · Click to select</div>
             <button
-              onClick={() => setResultsOpen(false)}
-              className="text-mortar-500 hover:text-mortar-300 text-xs"
-            >Hide</button>
+              onClick={() => { setResultsOpen(false); handleUnhoverSuggestion() }}
+              className="text-mortar-500 hover:text-mortar-300 text-lg leading-none w-6 h-6 grid place-items-center rounded hover:bg-mortar-800"
+            >✕</button>
           </div>
+
           {fitSuggestions.length === 0 ? (
             <div className="px-4 py-6 text-center text-xs text-mortar-500">
               No good fits in the next 4 days — every rep's route is full or too far.
@@ -232,34 +344,60 @@ export default function FitPanel({ crews, onResult, currentResult, onClear, onFl
             <ul className="divide-y divide-mortar-800">
               {fitSuggestions.map((s, i) => {
                 const rep = crews.find(c => c.id === s.rep_id)
+                const isHovered = hoveredIdx === i
                 return (
-                  <li key={i} className="px-3 py-2.5 flex items-center gap-3 hover:bg-mortar-800/50 transition">
-                    <div className="font-display text-2xl text-ns-400 w-6 text-center">{i + 1}</div>
-                    {rep?.avatar_url ? (
-                      <img
-                        src={rep.avatar_url}
-                        alt=""
-                        className="w-7 h-7 rounded-full object-cover flex-shrink-0"
-                        style={{ boxShadow: `0 0 0 1.5px ${rep.color}` }}
-                        referrerPolicy="no-referrer"
-                      />
-                    ) : (
-                      <div
-                        className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-                        style={{ background: rep?.color || '#4a9dcf' }}
-                      />
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-semibold text-mortar-300 truncate">
-                        {rep?.name || s.rep_id}
+                  <li
+                    key={i}
+                    className={[
+                      'px-3 py-2.5 transition cursor-pointer',
+                      isHovered ? 'bg-mortar-800' : 'hover:bg-mortar-800/60',
+                    ].join(' ')}
+                    onMouseEnter={() => handleHoverSuggestion(i, s)}
+                    onMouseLeave={handleUnhoverSuggestion}
+                    onClick={() => handleClickSuggestion(s)}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="font-display text-2xl w-7 text-center flex-shrink-0" style={{ color: isHovered ? rep?.color : '#4a9dcf' }}>
+                        {i + 1}
                       </div>
-                      <div className="text-[11px] text-mortar-500 truncate">
-                        {s.day_label} · {s.insert_label} · +{s.added_miles}mi / +{s.added_drive_min}m drive
+                      {rep?.avatar_url ? (
+                        <img
+                          src={rep.avatar_url}
+                          alt=""
+                          className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+                          style={{ boxShadow: `0 0 0 2px ${rep.color}` }}
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <div
+                          className="w-8 h-8 rounded-full grid place-items-center flex-shrink-0 text-white font-bold text-[10px]"
+                          style={{ background: rep?.color || '#4a9dcf' }}
+                        >
+                          {(rep?.name || '?').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()}
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-semibold text-mortar-300 truncate">
+                            {rep?.name || s.rep_id}
+                          </span>
+                          <span className="text-[10px] text-mortar-500 flex-shrink-0">
+                            {s.day_label}
+                          </span>
+                        </div>
+                        <div className="mt-1.5">
+                          <RouteChain suggestion={s} repColor={rep?.color || '#4a9dcf'} compact />
+                        </div>
                       </div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-[10px] uppercase tracking-wider text-mortar-500">Fit</div>
-                      <div className="text-lg font-bold text-ns-300 leading-none">{s.score}</div>
+                      <div className="text-right flex-shrink-0">
+                        <div className="text-[10px] uppercase tracking-wider text-mortar-500">Detour</div>
+                        <div className="text-sm font-bold leading-none" style={{ color: s.added_miles < 2 ? '#10b981' : s.added_miles < 10 ? '#f59e0b' : '#ef4444' }}>
+                          +{s.added_miles}mi
+                        </div>
+                        <div className="text-[10px] text-mortar-500 mt-0.5">
+                          +{s.added_drive_min}m
+                        </div>
+                      </div>
                     </div>
                   </li>
                 )
@@ -267,7 +405,7 @@ export default function FitPanel({ crews, onResult, currentResult, onClear, onFl
             </ul>
           )}
           <div className="px-3 py-1.5 border-t border-mortar-800 text-[10px] text-mortar-500 text-center bg-mortar-950">
-            Lower added drive time = higher fit score. Click a rep on the left to see their route.
+            Green &lt; 2mi detour · amber &lt; 10mi · red &gt; 10mi. Click a row to open that rep's full day.
           </div>
         </div>
       )}

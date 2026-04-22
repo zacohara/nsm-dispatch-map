@@ -153,17 +153,27 @@ html, body, #root {
 
 /* ── FIT-SEARCH PIN ─────────────────────────────────────── */
 .fit-pin {
-  width: 22px;
-  height: 22px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   background: var(--ns-400);
-  border: 3px solid var(--cream);
-  box-shadow: 0 2px 10px rgba(0,0,0,0.6);
+  border: 4px solid var(--cream);
+  box-shadow: 0 3px 12px rgba(0,0,0,0.7);
   animation: pulse-fit 1.6s infinite;
+  position: relative;
+}
+.fit-pin::before {
+  content: '';
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--cream);
 }
 @keyframes pulse-fit {
-  0%, 100% { box-shadow: 0 2px 10px rgba(0,0,0,0.6), 0 0 0 0 rgba(74,157,207,0.75); }
-  50%      { box-shadow: 0 2px 10px rgba(0,0,0,0.6), 0 0 0 16px rgba(74,157,207,0); }
+  0%, 100% { box-shadow: 0 3px 12px rgba(0,0,0,0.7), 0 0 0 0 rgba(74,157,207,0.75); }
+  50%      { box-shadow: 0 3px 12px rgba(0,0,0,0.7), 0 0 0 20px rgba(74,157,207,0); }
 }
 
 /* ── HOME PINS ──────────────────────────────────────────── */
@@ -178,6 +188,7 @@ html, body, #root {
   transform: rotate(-4deg);
   transition: opacity 0.25s, filter 0.25s, transform 0.25s;
   opacity: 0.75;
+  position: relative;
 }
 .home-pin.active {
   opacity: 1;
@@ -189,6 +200,43 @@ html, body, #root {
   transform: rotate(4deg);
   filter: grayscale(0.15);
   line-height: 1;
+}
+/* Rank badge on home pin for fit mode — top-left corner */
+.home-pin .home-rank {
+  position: absolute;
+  top: -7px;
+  left: -7px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--ns-400);
+  color: white;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 800;
+  font-size: 12px;
+  line-height: 18px;
+  text-align: center;
+  border: 2px solid var(--mortar-950);
+  transform: rotate(4deg);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+}
+
+/* NEW-slot pin — used during fit preview */
+.route-pin.new-slot {
+  border: 3px solid var(--cream);
+  animation: pin-pop 0.3s cubic-bezier(.34,1.56,.64,1) both,
+             new-slot-pulse 1.4s ease-in-out infinite;
+}
+.route-pin.new-slot span {
+  color: white;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+}
+@keyframes new-slot-pulse {
+  0%, 100% { box-shadow: 0 4px 14px rgba(0,0,0,0.7), 0 0 0 0 rgba(74,157,207,0.8); }
+  50%      { box-shadow: 0 4px 14px rgba(0,0,0,0.7), 0 0 0 14px rgba(74,157,207,0); }
 }
 
 /* ── SUGGEST BUTTON PULSE ──────────────────────────────── */

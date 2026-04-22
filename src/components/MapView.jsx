@@ -4,10 +4,9 @@ import L from 'leaflet'
 import { formatTime, crewColor } from '../lib/utils'
 import { crewDayMiles, crewDayDriveMin } from '../lib/recommender'
 
-// JT job URL — direct link to open a job in JobTread
 const JT_JOB_URL = (jobId) => `https://app.jobtread.com/jobs/${jobId}`
 
-// Fit to a set of points when the set identity changes
+// Fit to a set of points when trigger changes
 function FitBounds({ points, trigger }) {
   const map = useMap()
   useEffect(() => {
@@ -19,7 +18,6 @@ function FitBounds({ points, trigger }) {
   return null
 }
 
-// Pan to the selected task
 function PanToSelected({ lat, lng, trigger }) {
   const map = useMap()
   useEffect(() => {
@@ -30,7 +28,7 @@ function PanToSelected({ lat, lng, trigger }) {
   return null
 }
 
-// Teardrop pin with initials — DEFAULT MODE
+// Teardrop pin — default mode
 function teardropIcon(color, label, isOrphan, dimmed) {
   const classes = ['dispatch-pin']
   if (isOrphan) classes.push('orphan')
@@ -44,7 +42,7 @@ function teardropIcon(color, label, isOrphan, dimmed) {
   })
 }
 
-// Numbered disc — ROUTE MODE
+// Numbered disc — route mode
 function numberedIcon(color, n, isHighlighted) {
   const size = isHighlighted ? 42 : 34
   const cls = 'route-pin' + (isHighlighted ? ' highlighted' : '')
@@ -57,30 +55,32 @@ function numberedIcon(color, n, isHighlighted) {
   })
 }
 
-// Home marker — 🏠 pin in rep's color
-function homeIcon(color, isActive) {
+// Home marker
+function homeIcon(color, isActive, rank) {
   const cls = 'home-pin' + (isActive ? ' active' : '')
+  const rankBadge = rank != null
+    ? `<div class="home-rank">${rank}</div>`
+    : ''
   return L.divIcon({
     className: '',
-    html: `<div class="${cls}" style="background:${color}"><span>🏠</span></div>`,
+    html: `<div class="${cls}" style="background:${color}"><span>🏠</span>${rankBadge}</div>`,
     iconSize: [28, 28],
     iconAnchor: [14, 14],
     popupAnchor: [0, -14],
   })
 }
 
-// Fit-search destination pin
+// Fit-search destination pin — bigger & more prominent
 function fitIcon() {
   return L.divIcon({
     className: '',
     html: `<div class="fit-pin"></div>`,
-    iconSize: [22, 22],
-    iconAnchor: [11, 11],
-    popupAnchor: [0, -11],
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+    popupAnchor: [0, -14],
   })
 }
 
-// Shared popup content
 function PopupCard({ task, rep, stopNum, stopTotal }) {
   const jtUrl = task.jt_job_id ? JT_JOB_URL(task.jt_job_id) : null
   return (
@@ -143,6 +143,7 @@ export default function MapView({
   selectedTaskId,
   onSelectTask,
   fitResult,
+  previewSuggestion, // { rep_id, day, insert_index, day_stops } from FitPanel hover
 }) {
   const mapRef = useRef(null)
 
@@ -151,6 +152,49 @@ export default function MapView({
     [tasks]
   )
 
+  // Derive the three visual modes
+  const isPreviewMode = Boolean(previewSuggestion)
+  const isFitMode = !isPreviewMode && Boolean(fitResult)
+  const isRouteMode = !isPreviewMode && !isFitMode && Boolean(selectedCrewId)
+
+  // ========= Preview mode (hovering a suggestion) =========
+  // Shows ONLY: previewRep's home + their day_stops + the new lead → detour arc
+  const previewRep = useMemo(() => {
+    if (!previewSuggestion) return null
+    return crews.find(c => c.id === previewSuggestion.rep_id) || null
+  }, [previewSuggestion, crews])
+
+  const previewRoutePositions = useMemo(() => {
+    if (!previewSuggestion || !previewRep || !fitResult) return null
+    const stops = previewSuggestion.day_stops || []
+    const hasHome = previewRep.home_lat != null && previewRep.home_lng != null
+    const pts = []
+    if (hasHome) pts.push([previewRep.home_lat, previewRep.home_lng])
+
+    // Insert the new lead at the specified index, relative to the existing stops
+    const insertIdx = previewSuggestion.insert_index ?? stops.length
+    for (let i = 0; i < stops.length; i++) {
+      if (i === insertIdx) pts.push([fitResult.lat, fitResult.lng])
+      pts.push([stops[i].lat, stops[i].lng])
+    }
+    if (insertIdx >= stops.length) pts.push([fitResult.lat, fitResult.lng])
+    if (hasHome) pts.push([previewRep.home_lat, previewRep.home_lng])
+    return pts
+  }, [previewSuggestion, previewRep, fitResult])
+
+  // ========= Fit mode (drawer open, no hover yet) =========
+  // Shows: lead pin + top-5 recommended reps' homes (ranked). Everyone else hidden.
+  const recommendedRepIds = useMemo(() => {
+    if (!fitResult?.suggestions) return []
+    return Array.from(new Set(fitResult.suggestions.map(s => s.rep_id)))
+  }, [fitResult])
+
+  const recommendedReps = useMemo(
+    () => crews.filter(c => recommendedRepIds.includes(c.id)),
+    [crews, recommendedRepIds]
+  )
+
+  // ========= Route mode (rep selected) =========
   const selectedTasks = useMemo(() => {
     if (!selectedCrewId) return []
     return visible
@@ -168,7 +212,6 @@ export default function MapView({
     [selectedCrewId, crews]
   )
 
-  // Route positions — start at home, hit each stop in order, return home
   const routePositions = useMemo(() => {
     if (!selectedTasks.length) return null
     const pts = []
@@ -179,24 +222,39 @@ export default function MapView({
     return pts
   }, [selectedTasks, selectedCrew])
 
-  // All reps that have a home coord — used to render home markers
+  // ========= All home-bases (default mode only) =========
   const repsWithHome = useMemo(
     () => crews.filter(c => c.home_lat != null && c.home_lng != null),
     [crews]
   )
 
+  // ========= Bounds =========
   const boundsPoints = useMemo(() => {
-    if (selectedTasks.length) {
+    if (isPreviewMode && previewRoutePositions) {
+      return previewRoutePositions.map(p => ({ lat: p[0], lng: p[1] }))
+    }
+    if (isFitMode) {
+      // Focus: lead + top recommended rep homes + their stops from suggestions
+      const pts = [{ lat: fitResult.lat, lng: fitResult.lng }]
+      recommendedReps.forEach(r => {
+        if (r.home_lat != null) pts.push({ lat: r.home_lat, lng: r.home_lng })
+      })
+      ;(fitResult.suggestions || []).forEach(s => {
+        (s.day_stops || []).forEach(st => {
+          if (st.lat != null) pts.push({ lat: st.lat, lng: st.lng })
+        })
+      })
+      return pts
+    }
+    if (isRouteMode && selectedTasks.length) {
       const pts = [...selectedTasks]
       if (selectedCrew?.home_lat != null) {
         pts.push({ lat: selectedCrew.home_lat, lng: selectedCrew.home_lng })
       }
       return pts
     }
-    const pts = [...visible]
-    if (fitResult?.lat != null) pts.push({ lat: fitResult.lat, lng: fitResult.lng })
-    return pts
-  }, [selectedTasks, selectedCrew, visible, fitResult])
+    return visible
+  }, [isPreviewMode, isFitMode, isRouteMode, previewRoutePositions, fitResult, recommendedReps, selectedTasks, selectedCrew, visible])
 
   const selectedTaskCoords = useMemo(() => {
     if (!selectedTaskId) return { lat: null, lng: null }
@@ -205,51 +263,64 @@ export default function MapView({
   }, [selectedTaskId, visible])
 
   const defaultCenter = [41.8781, -87.6298]
-  const boundsTrigger = `${selectedCrewId || 'all'}|${visible.length}|${fitResult?.lat || ''}`
+  const boundsTrigger = [
+    isPreviewMode ? `pv-${previewSuggestion?.rep_id}-${previewSuggestion?.day}-${previewSuggestion?.insert_index}` : '',
+    isFitMode ? `fit-${fitResult?.lat}` : '',
+    isRouteMode ? `rt-${selectedCrewId}` : '',
+    !isPreviewMode && !isFitMode && !isRouteMode ? `def-${visible.length}` : '',
+  ].join('|')
   const panTrigger = selectedTaskId || ''
 
-  // Route totals for the header strip
+  // Route totals (route mode only)
   const routeTotals = useMemo(() => {
-    if (!selectedCrew || !selectedTasks.length) return null
+    if (!isRouteMode || !selectedCrew || !selectedTasks.length) return null
     const miles = crewDayMiles(selectedCrew, selectedTasks)
     const driveMin = crewDayDriveMin(selectedCrew, selectedTasks)
     const firstTime = selectedTasks[0]?.start_time
-    const lastTask = selectedTasks[selectedTasks.length - 1]
-    const lastTime = lastTask?.start_time
+    const lastTime = selectedTasks[selectedTasks.length - 1]?.start_time
     return { miles, driveMin, firstTime, lastTime, stops: selectedTasks.length }
-  }, [selectedCrew, selectedTasks])
+  }, [isRouteMode, selectedCrew, selectedTasks])
 
   return (
     <div className="h-full w-full relative">
-      {/* Route totals strip */}
+      {/* Route totals strip (route mode only) */}
       {routeTotals && selectedCrew && (
         <div
           className="absolute top-3 left-1/2 -translate-x-1/2 z-[500] bg-mortar-900/95 backdrop-blur border border-mortar-800 rounded-lg shadow-xl px-4 py-2 flex items-center gap-4 pointer-events-none"
           style={{ boxShadow: `0 6px 20px rgba(0,0,0,0.5), 0 0 0 1px ${selectedCrew.color}40` }}
         >
           <div className="flex items-center gap-2">
-            <div
-              className="w-2.5 h-2.5 rounded-full"
-              style={{ background: selectedCrew.color }}
-            />
+            <div className="w-2.5 h-2.5 rounded-full" style={{ background: selectedCrew.color }} />
             <span className="font-display text-sm font-bold text-cream">{selectedCrew.name}</span>
           </div>
           <div className="h-5 w-px bg-mortar-700" />
           <div className="flex items-center gap-3 text-[11px]">
-            <span className="text-mortar-300">
-              <strong className="text-cream">{routeTotals.stops}</strong> stop{routeTotals.stops === 1 ? '' : 's'}
-            </span>
-            <span className="text-mortar-300">
-              <strong className="text-cream">{routeTotals.miles}</strong>mi
-            </span>
-            <span className="text-mortar-300">
-              <strong className="text-cream">{Math.floor(routeTotals.driveMin / 60)}h {routeTotals.driveMin % 60}m</strong> drive
-            </span>
+            <span className="text-mortar-300"><strong className="text-cream">{routeTotals.stops}</strong> stop{routeTotals.stops === 1 ? '' : 's'}</span>
+            <span className="text-mortar-300"><strong className="text-cream">{routeTotals.miles}</strong>mi</span>
+            <span className="text-mortar-300"><strong className="text-cream">{Math.floor(routeTotals.driveMin / 60)}h {routeTotals.driveMin % 60}m</strong> drive</span>
             {routeTotals.firstTime && (
               <span className="text-mortar-500">
                 {formatTime(routeTotals.firstTime)}–{formatTime(routeTotals.lastTime) || '—'}
               </span>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Preview banner (hover mode) */}
+      {isPreviewMode && previewRep && (
+        <div
+          className="absolute top-3 left-1/2 -translate-x-1/2 z-[500] bg-mortar-900/95 backdrop-blur border rounded-lg shadow-xl px-4 py-2 flex items-center gap-3 pointer-events-none"
+          style={{ borderColor: previewRep.color }}
+        >
+          <div className="text-[10px] uppercase tracking-[0.2em] text-ns-400 font-display">Preview</div>
+          <div className="h-4 w-px bg-mortar-700" />
+          <div className="flex items-center gap-2">
+            <div className="w-2.5 h-2.5 rounded-full" style={{ background: previewRep.color }} />
+            <span className="font-semibold text-cream text-sm">{previewRep.name}</span>
+            <span className="text-mortar-500 text-[11px]">
+              · {previewSuggestion.day_label} · +{previewSuggestion.added_miles}mi detour
+            </span>
           </div>
         </div>
       )}
@@ -266,33 +337,175 @@ export default function MapView({
           url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
         />
 
-        {/* Home markers
-              - route mode (a rep is selected): ONLY that rep's home
-              - default mode: all reps' homes
-            Prevents the 'two homes' confusion when viewing one rep's route. */}
-        {repsWithHome
-          .filter(rep => !selectedCrewId || rep.id === selectedCrewId)
-          .map(rep => {
-            const isActive = !selectedCrewId || rep.id === selectedCrewId
+        {/* ========= HOME MARKERS ========= */}
+        {/* Preview mode: just the previewed rep's home */}
+        {isPreviewMode && previewRep?.home_lat != null && (
+          <Marker
+            position={[previewRep.home_lat, previewRep.home_lng]}
+            icon={homeIcon(previewRep.color, true)}
+            zIndexOffset={400}
+          >
+            <Popup>
+              <div className="text-xs font-bold text-mortar-300">{previewRep.name}'s home base</div>
+              <div className="text-[11px] text-mortar-500">{previewRep.home_town}</div>
+            </Popup>
+          </Marker>
+        )}
+
+        {/* Fit mode: top-5 recommended reps' homes, ranked */}
+        {isFitMode && recommendedReps.map(rep => {
+          const rank = recommendedRepIds.indexOf(rep.id) + 1
+          return rep.home_lat != null && (
+            <Marker
+              key={`home-${rep.id}`}
+              position={[rep.home_lat, rep.home_lng]}
+              icon={homeIcon(rep.color, true, rank)}
+              zIndexOffset={500 - rank}
+            >
+              <Popup>
+                <div className="text-xs font-bold text-mortar-300">
+                  #{rank} — {rep.name}'s home base
+                </div>
+                <div className="text-[11px] text-mortar-500">{rep.home_town}</div>
+              </Popup>
+            </Marker>
+          )
+        })}
+
+        {/* Route mode: selected rep's home only */}
+        {isRouteMode && selectedCrew?.home_lat != null && (
+          <Marker
+            position={[selectedCrew.home_lat, selectedCrew.home_lng]}
+            icon={homeIcon(selectedCrew.color, true)}
+            zIndexOffset={400}
+          >
+            <Popup>
+              <div className="text-xs font-bold text-mortar-300">{selectedCrew.name}'s home base</div>
+              <div className="text-[11px] text-mortar-500">{selectedCrew.home_town}</div>
+            </Popup>
+          </Marker>
+        )}
+
+        {/* Default mode: all 7 homes */}
+        {!isPreviewMode && !isFitMode && !isRouteMode && repsWithHome.map(rep => (
+          <Marker
+            key={`home-${rep.id}`}
+            position={[rep.home_lat, rep.home_lng]}
+            icon={homeIcon(rep.color, true)}
+            zIndexOffset={100}
+          >
+            <Popup>
+              <div className="text-xs font-bold text-mortar-300">{rep.name}'s home base</div>
+              <div className="text-[11px] text-mortar-500">{rep.home_town}</div>
+            </Popup>
+          </Marker>
+        ))}
+
+        {/* ========= ROUTE LINES & PINS ========= */}
+
+        {/* Preview mode: dashed detour + numbered stops (with NEW marker inserted) */}
+        {isPreviewMode && previewRep && previewRoutePositions && previewRoutePositions.length >= 2 && (
+          <>
+            <Polyline
+              positions={previewRoutePositions}
+              pathOptions={{
+                color: previewRep.color,
+                weight: 3,
+                opacity: 0.55,
+              }}
+            />
+            <Polyline
+              positions={previewRoutePositions}
+              pathOptions={{
+                color: previewRep.color,
+                weight: 3,
+                opacity: 0.95,
+                dashArray: '2 14',
+                lineCap: 'round',
+                className: 'route-line-flow',
+              }}
+            />
+            {/* Render numbered pins for existing stops + the NEW slot */}
+            {(() => {
+              const stops = previewSuggestion.day_stops || []
+              const insertIdx = previewSuggestion.insert_index ?? stops.length
+              const combined = []
+              for (let i = 0; i < stops.length; i++) {
+                if (i === insertIdx) {
+                  combined.push({ isNew: true, lat: fitResult.lat, lng: fitResult.lng })
+                }
+                combined.push({ isNew: false, ...stops[i] })
+              }
+              if (insertIdx >= stops.length) {
+                combined.push({ isNew: true, lat: fitResult.lat, lng: fitResult.lng })
+              }
+              return combined.map((item, idx) => (
+                <Marker
+                  key={item.isNew ? 'preview-new' : `preview-stop-${item.id}`}
+                  position={[item.lat, item.lng]}
+                  icon={item.isNew
+                    ? L.divIcon({
+                        className: '',
+                        html: `<div class="route-pin new-slot" style="background:#4a9dcf;width:44px;height:44px;"><span>NEW</span></div>`,
+                        iconSize: [44, 44],
+                        iconAnchor: [22, 22],
+                        popupAnchor: [0, -22],
+                      })
+                    : numberedIcon(previewRep.color, idx + 1, false)
+                  }
+                  zIndexOffset={item.isNew ? 3000 : 500 + idx}
+                >
+                  <Popup>
+                    {item.isNew ? (
+                      <div className="text-xs">
+                        <div className="font-bold text-ns-400">New lead slot</div>
+                        <div className="text-mortar-300 mt-1">{fitResult.address}</div>
+                      </div>
+                    ) : (
+                      <div className="text-xs">
+                        <div className="font-bold text-mortar-300">{item.job_name}</div>
+                        <div className="text-mortar-500">{item.job_address}</div>
+                        <div className="text-[10px] text-mortar-500 mt-1">
+                          {formatTime(item.start_time) || 'no time'}
+                        </div>
+                      </div>
+                    )}
+                  </Popup>
+                </Marker>
+              ))
+            })()}
+          </>
+        )}
+
+        {/* Fit mode: show each recommended rep's stops for their suggested day (dim) */}
+        {isFitMode && fitResult.suggestions?.map((s, i) => {
+          const rep = crews.find(c => c.id === s.rep_id)
+          if (!rep) return null
+          return (s.day_stops || []).map((stop, stopIdx) => {
+            const initials = rep.name?.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase() || ''
             return (
               <Marker
-                key={`home-${rep.id}`}
-                position={[rep.home_lat, rep.home_lng]}
-                icon={homeIcon(rep.color, isActive)}
-                zIndexOffset={isActive ? 400 : 50}
+                key={`fit-stop-${s.rep_id}-${s.day}-${stop.id}`}
+                position={[stop.lat, stop.lng]}
+                icon={teardropIcon(rep.color, initials, false, false)}
+                zIndexOffset={100}
               >
                 <Popup>
                   <div className="text-xs">
-                    <div className="font-bold text-mortar-300">{rep.name}'s home base</div>
-                    <div className="text-mortar-500 text-[11px] mt-0.5">{rep.home_town || 'Home'}</div>
+                    <div className="font-bold text-mortar-300">{stop.job_name}</div>
+                    <div className="text-mortar-500">{stop.job_address}</div>
+                    <div className="text-[10px] text-mortar-500 mt-1">
+                      {rep.name} · {s.day_label}
+                    </div>
                   </div>
                 </Popup>
               </Marker>
             )
-          })}
+          })
+        })}
 
-        {/* ROUTE MODE: numbered discs + flowing-dot line */}
-        {selectedCrewId && selectedTasks.length > 0 && (
+        {/* Route mode: numbered pins + animated line */}
+        {isRouteMode && selectedTasks.length > 0 && (
           <>
             {selectedTasks.map((t, i) => {
               const color = selectedCrew?.color || '#4a9dcf'
@@ -313,32 +526,15 @@ export default function MapView({
             })}
             {routePositions && routePositions.length >= 2 && (
               <>
-                <Polyline
-                  positions={routePositions}
-                  pathOptions={{
-                    color: selectedCrew?.color || '#4a9dcf',
-                    weight: 3,
-                    opacity: 0.55,
-                  }}
-                />
-                <Polyline
-                  positions={routePositions}
-                  pathOptions={{
-                    color: selectedCrew?.color || '#4a9dcf',
-                    weight: 3,
-                    opacity: 0.95,
-                    dashArray: '2 14',
-                    lineCap: 'round',
-                    className: 'route-line-flow',
-                  }}
-                />
+                <Polyline positions={routePositions} pathOptions={{ color: selectedCrew?.color || '#4a9dcf', weight: 3, opacity: 0.55 }} />
+                <Polyline positions={routePositions} pathOptions={{ color: selectedCrew?.color || '#4a9dcf', weight: 3, opacity: 0.95, dashArray: '2 14', lineCap: 'round', className: 'route-line-flow' }} />
               </>
             )}
           </>
         )}
 
-        {/* DEFAULT MODE: small colored teardrops */}
-        {!selectedCrewId && visible.map(t => {
+        {/* Default mode: all visible task pins */}
+        {!isPreviewMode && !isFitMode && !isRouteMode && visible.map(t => {
           const crewObj = crews.find(c => c.id === t.crew_id)
           const color = crewColor(t.crew_id, crews)
           const isOrphan = !t.crew_id
@@ -359,8 +555,8 @@ export default function MapView({
           )
         })}
 
-        {/* Route mode: dim others */}
-        {selectedCrewId && visible
+        {/* Route mode: dim other reps' pins */}
+        {isRouteMode && visible
           .filter(t => t.crew_id !== selectedCrewId)
           .map(t => {
             const crewObj = crews.find(c => c.id === t.crew_id)
@@ -382,15 +578,15 @@ export default function MapView({
             )
           })}
 
-        {/* Fit-search destination */}
-        {fitResult?.lat != null && (
+        {/* Fit-search destination pin (any mode that includes fitResult) */}
+        {fitResult?.lat != null && !isPreviewMode && (
           <Marker position={[fitResult.lat, fitResult.lng]} icon={fitIcon()} zIndexOffset={2500}>
             <Popup>
               <div className="text-xs">
-                <div className="font-bold text-ns-400 mb-1">Lead address</div>
+                <div className="font-bold text-ns-400 mb-1">New lead</div>
                 <div className="text-mortar-300">{fitResult.address}</div>
                 <div className="text-[10px] text-mortar-500 mt-1">
-                  {fitResult.suggestions?.length || 0} recommended slot{fitResult.suggestions?.length === 1 ? '' : 's'}
+                  {fitResult.suggestions?.length || 0} recommended slot{fitResult.suggestions?.length === 1 ? '' : 's'} — hover a suggestion to preview
                 </div>
               </div>
             </Popup>

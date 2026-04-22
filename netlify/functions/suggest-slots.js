@@ -166,11 +166,24 @@ export default async (req) => {
   const ranked = Array.from(bestPerRepDay.values())
     .sort((a, b) => a.added_miles - b.added_miles)
     .slice(0, 5)
-    .map(c => ({
-      ...c,
-      day_label: formatDayLabel(c.day),
-      score: Math.max(0, Math.round(100 - c.added_miles * 2.5)),
-    }))
+    .map(c => {
+      // Embed the rep's existing stops for that day so the client can
+      // render a preview route (Home → stops → NEW slot → Home) on hover.
+      const dayStops = (buckets.get(`${c.rep_id}|${c.day}`) || []).map(s => ({
+        id: s.id,
+        job_name: s.job_name,
+        job_address: s.job_address,
+        lat: s.lat,
+        lng: s.lng,
+        start_time: s.start_time,
+      }))
+      return {
+        ...c,
+        day_label: formatDayLabel(c.day),
+        score: Math.max(0, Math.round(100 - c.added_miles * 2.5)),
+        day_stops: dayStops,
+      }
+    })
 
   return json({
     address: resolved,
