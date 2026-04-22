@@ -2,10 +2,21 @@ import pg from 'pg'
 const { Client } = pg
 
 export default async (req) => {
-  const cs = Buffer.from(
-    'cG9zdGdyZXNxbDovL3Bvc3RncmVzLndrcnRianZiamViaGJjand1cmhiOkRpZWdvRGFrb3RhMzc0MiFAYXdzLTEtdXMtZWFzdC0yLnBvb2xlci5zdXBhYmFzZS5jb206NjU0My9wb3N0Z3Jlcw==',
-    'base64'
-  ).toString()
+  // Require a simple shared-secret header to prevent random internet callers from hitting this
+  const auth = req.headers.get('x-migrate-auth')
+  if (auth !== process.env.MIGRATE_AUTH_TOKEN) {
+    return new Response(JSON.stringify({ error: 'unauthorized' }), {
+      status: 401, headers: { 'Content-Type': 'application/json' },
+    })
+  }
+
+  const cs = process.env.SUPABASE_DB_URL
+  if (!cs) {
+    return new Response(JSON.stringify({ error: 'SUPABASE_DB_URL env var not set' }), {
+      status: 500, headers: { 'Content-Type': 'application/json' },
+    })
+  }
+
   const client = new Client({
     connectionString: cs,
     ssl: { rejectUnauthorized: false },

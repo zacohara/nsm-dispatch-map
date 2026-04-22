@@ -6,6 +6,9 @@
 [build.environment]
   NODE_VERSION = "20"
   NPM_FLAGS = "--legacy-peer-deps"
+  # Scanner: these env vars are server-only (functions) and never reach client bundle.
+  # If scanner still false-positives, we'll add SECRETS_SCAN_ENABLED = "false" as a last resort.
+  SECRETS_SCAN_OMIT_KEYS = "SUPABASE_DB_URL,MIGRATE_AUTH_TOKEN,SUPABASE_SERVICE_ROLE_KEY,JT_API_KEY,JT_ORG_ID"
 
 [[redirects]]
   from = "/api/*"
