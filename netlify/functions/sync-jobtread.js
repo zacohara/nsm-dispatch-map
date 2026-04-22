@@ -43,7 +43,7 @@ export default async (req) => {
     // Paginate in case there are more than one page of tasks in window
     const allNodes = []
     let page = null
-    for (let i = 0; i < 10; i++) { // hard cap 10 pages
+    for (let i = 0; i < 20; i++) { // hard cap 20 pages of 100 = 2000 tasks
       const payload = {
         query: {
           $: { grantKey: JT_API_KEY },
@@ -51,7 +51,7 @@ export default async (req) => {
             $: { id: JT_ORG_ID },
             tasks: {
               $: {
-                size: 200,
+                size: 100,
                 ...(page ? { page } : {}),
                 where: {
                   and: [
