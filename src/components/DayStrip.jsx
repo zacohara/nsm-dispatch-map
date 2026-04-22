@@ -17,7 +17,7 @@ export default function DayStrip({ date, onChange, taskCountsByDate = {} }) {
             className={[
               'flex flex-col items-center min-w-[68px] px-3 py-2 rounded-lg border transition-all',
               selected
-                ? 'bg-brick-600 border-brick-500 text-white shadow-lg shadow-brick-900/40'
+                ? 'bg-ns-500 border-ns-400 text-white shadow-lg shadow-ns-900/60'
                 : 'bg-mortar-900 border-mortar-800 text-mortar-300 hover:bg-mortar-800 hover:border-mortar-500',
             ].join(' ')}
           >

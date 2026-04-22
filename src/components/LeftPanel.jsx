@@ -33,7 +33,7 @@ export default function LeftPanel({
         key={isUnassigned ? '__unassigned__' : crew.id}
         className={[
           'crew-dropzone rounded-lg mb-2 border transition-colors',
-          isSelected ? 'border-brick-500 bg-mortar-900' : 'border-mortar-800 bg-mortar-900/60',
+          isSelected ? 'border-ns-400 bg-mortar-900' : 'border-mortar-800 bg-mortar-900/60',
           isDropTarget ? 'drop-target' : '',
         ].join(' ')}
         onDragOver={e => { if (!isUnassigned) e.preventDefault() }}
@@ -70,7 +70,7 @@ export default function LeftPanel({
                 className={[
                   'task-card text-xs rounded border px-2 py-1.5',
                   selectedTaskId === t.id
-                    ? 'border-brick-500 bg-mortar-800'
+                    ? 'border-ns-400 bg-mortar-800'
                     : 'border-mortar-800 bg-mortar-950 hover:bg-mortar-800',
                   draggedTask?.id === t.id ? 'dragging' : '',
                 ].join(' ')}

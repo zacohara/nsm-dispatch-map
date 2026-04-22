@@ -72,12 +72,12 @@ export async function reassignTask(taskId, newCrewId, reason = 'manual drag') {
   return r.json()
 }
 
-export async function optimizeDay(date) {
-  const r = await fetch('/api/optimize-day', {
+export async function suggestSlots({ address, duration_hrs = 2 }) {
+  const r = await fetch('/api/suggest-slots', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ date }),
+    body: JSON.stringify({ address, duration_hrs }),
   })
-  if (!r.ok) throw new Error(`Optimize failed: ${r.status}`)
+  if (!r.ok) throw new Error(`Suggest failed: ${r.status}`)
   return r.json()
 }

@@ -52,14 +52,6 @@ export default function HealthPanel({ crews, tasks, syncInfo, syncing, onSync, o
       >
         {syncing ? '⟳ Syncing…' : '⟳ Sync JT'}
       </button>
-
-      <button
-        onClick={onOptimize}
-        disabled={tasks.length === 0}
-        className="px-2.5 py-1 text-xs rounded bg-brick-600 hover:bg-brick-700 text-white font-semibold disabled:opacity-40"
-      >
-        ⚡ Optimize day
-      </button>
     </div>
   )
 }

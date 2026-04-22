@@ -1,22 +1,22 @@
 import { useState, useMemo, useEffect } from 'react'
-import { useDispatchData, triggerSync, reassignTask, optimizeDay } from './lib/data'
+import { useDispatchData, triggerSync, reassignTask } from './lib/data'
 import { todayISO, fmtDate, addDays } from './lib/utils'
 import { supabase } from './lib/supabase'
 import DayStrip from './components/DayStrip'
 import LeftPanel from './components/LeftPanel'
 import MapView from './components/MapView'
 import HealthPanel from './components/HealthPanel'
-import OptimizeModal from './components/OptimizeModal'
+import FitPanel from './components/FitPanel'
 
 export default function App() {
   const [date, setDate] = useState(todayISO())
   const [selectedCrewId, setSelectedCrewId] = useState(null)
   const [selectedTaskId, setSelectedTaskId] = useState(null)
-  const [showOptimize, setShowOptimize] = useState(false)
   const [draggedTask, setDraggedTask] = useState(null)
   const [syncing, setSyncing] = useState(false)
   const [toast, setToast] = useState(null)
   const [taskCountsByDate, setTaskCountsByDate] = useState({})
+  const [fitResult, setFitResult] = useState(null) // { address, lat, lng, suggestions:[] }
 
   const { crews, tasks, syncInfo, loading, error, reload } = useDispatchData(date)
 
@@ -58,7 +58,7 @@ export default function App() {
   const handleReassign = async (taskId, newCrewId, reason = 'manual') => {
     try {
       await reassignTask(taskId, newCrewId, reason)
-      flash('Crew reassigned', 'success')
+      flash('Reassigned', 'success')
       await reload()
     } catch (e) {
       flash(`Reassign failed: ${e.message}`, 'error')
@@ -75,18 +75,28 @@ export default function App() {
   return (
     <div className="h-screen flex flex-col bg-mortar-950">
       {/* Header */}
-      <header className="px-4 py-2.5 border-b border-mortar-800 bg-mortar-900 flex items-center justify-between">
+      <header className="px-5 py-3 bg-mortar-900 flex items-center justify-between border-b border-mortar-800">
         <div className="flex items-center gap-3">
-          <img src="/ns-mark.png" alt="North Shore" className="w-9 h-9 object-contain" />
-          <div>
-            <div className="text-[10px] uppercase tracking-wider text-mortar-500 leading-none">North Shore Masonry</div>
-            <div className="text-sm font-bold text-mortar-300 leading-tight">Dispatch</div>
+          <img src="/ns-mark.png" alt="" className="w-10 h-10 object-contain" />
+          <div className="flex flex-col leading-none">
+            <div className="font-display text-cream text-[22px] tracking-tight">
+              North Shore <span className="text-ns-400">Dispatch</span>
+            </div>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <span className="h-px w-4 bg-mortar-500" />
+              <span className="text-[9px] uppercase tracking-[0.2em] text-mortar-500">Since 1978</span>
+              <span className="h-px w-4 bg-mortar-500" />
+            </div>
           </div>
         </div>
-        <div className="text-xs text-mortar-500">
-          {loading ? 'Loading…' : `${fmtDate(date, 'long')} · ${tasks.length} task${tasks.length === 1 ? '' : 's'}`}
+        <div className="text-right">
+          <div className="text-[10px] uppercase tracking-wider text-mortar-500">Today</div>
+          <div className="text-sm font-semibold text-mortar-300">
+            {loading ? 'Loading…' : `${fmtDate(date, 'long')} · ${tasks.length} task${tasks.length === 1 ? '' : 's'}`}
+          </div>
         </div>
       </header>
+      <div className="brand-seam" />
 
       {/* Day strip */}
       <DayStrip date={date} onChange={setDate} taskCountsByDate={taskCountsByDate} />
@@ -114,6 +124,7 @@ export default function App() {
             selectedCrewId={selectedCrewId}
             selectedTaskId={selectedTaskId}
             onSelectTask={setSelectedTaskId}
+            fitResult={fitResult}
           />
           {error && (
             <div className="absolute top-3 left-1/2 -translate-x-1/2 px-3 py-2 bg-red-900/80 text-red-100 text-xs rounded border border-red-700">
@@ -132,32 +143,29 @@ export default function App() {
         </main>
       </div>
 
-      {/* Health + actions bar */}
+      {/* Fit-address panel + health bar */}
+      <FitPanel
+        crews={crews}
+        onResult={setFitResult}
+        currentResult={fitResult}
+        onClear={() => setFitResult(null)}
+        onFlash={flash}
+      />
       <HealthPanel
         crews={crews}
         tasks={tasks}
         syncInfo={syncInfo}
         syncing={syncing}
         onSync={handleSync}
-        onOptimize={() => setShowOptimize(true)}
-      />
-
-      {/* Optimize modal */}
-      <OptimizeModal
-        open={showOptimize}
-        onClose={() => setShowOptimize(false)}
-        crews={crews}
-        tasks={tasks}
-        onApplySwap={(taskId, toCrewId) => handleReassign(taskId, toCrewId, 'optimizer')}
       />
 
       {/* Toast */}
       {toast && (
         <div className={[
-          'fixed bottom-20 left-1/2 -translate-x-1/2 px-4 py-2 rounded-lg text-sm text-white shadow-xl z-[3000]',
+          'fixed bottom-24 left-1/2 -translate-x-1/2 px-4 py-2 rounded-lg text-sm text-white shadow-xl z-[3000]',
           toast.type === 'success' ? 'bg-emerald-700' :
           toast.type === 'error'   ? 'bg-red-700' :
-          'bg-mortar-800 border border-mortar-500',
+          'bg-ns-600 border border-ns-400',
         ].join(' ')}>
           {toast.msg}
         </div>
