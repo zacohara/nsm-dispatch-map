@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useDispatchData, triggerSync, reassignTask } from './lib/data'
 import { todayISO, fmtDate, addDays } from './lib/utils'
 import { supabase } from './lib/supabase'
@@ -7,20 +7,30 @@ import LeftPanel from './components/LeftPanel'
 import MapView from './components/MapView'
 import HealthPanel from './components/HealthPanel'
 import FitPanel from './components/FitPanel'
+import SuggestPanel from './components/SuggestPanel'
 
 export default function App() {
   const [date, setDate] = useState(todayISO())
   const [selectedCrewId, setSelectedCrewId] = useState(null)
   const [selectedTaskId, setSelectedTaskId] = useState(null)
-  const [draggedTask, setDraggedTask] = useState(null)
   const [syncing, setSyncing] = useState(false)
   const [toast, setToast] = useState(null)
   const [taskCountsByDate, setTaskCountsByDate] = useState({})
-  const [fitResult, setFitResult] = useState(null) // { address, lat, lng, suggestions:[] }
+  const [fitResult, setFitResult] = useState(null)
+  const [stripTick, setStripTick] = useState(0) // bump to force count refresh
 
   const { crews, tasks, syncInfo, loading, error, reload } = useDispatchData(date)
 
-  // Preload task counts for the 14-day strip
+  // Wrap setDate to clear rep/task selections when switching days
+  const handleDateChange = useCallback((next) => {
+    if (next !== date) {
+      setSelectedCrewId(null)
+      setSelectedTaskId(null)
+    }
+    setDate(next)
+  }, [date])
+
+  // Preload task counts for the 14-day strip — refreshes on sync AND on any task mutation
   useEffect(() => {
     const start = todayISO()
     const end = addDays(start, 14)
@@ -35,7 +45,22 @@ export default function App() {
         data.forEach(r => { counts[r.scheduled_date] = (counts[r.scheduled_date] || 0) + 1 })
         setTaskCountsByDate(counts)
       })
-  }, [syncInfo?.started_at])
+  }, [syncInfo?.started_at, stripTick])
+
+  // Global ESC key — clears fit pin → selected task → selected rep, in order
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return
+      // Don't hijack ESC if user is in an input/textarea
+      const tag = e.target?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      if (fitResult) { setFitResult(null); return }
+      if (selectedTaskId) { setSelectedTaskId(null); return }
+      if (selectedCrewId) { setSelectedCrewId(null); return }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [fitResult, selectedTaskId, selectedCrewId])
 
   const flash = (msg, type = 'info') => {
     setToast({ msg, type })
@@ -46,8 +71,13 @@ export default function App() {
     setSyncing(true)
     try {
       const r = await triggerSync()
-      flash(`Synced ${r.rows_touched || 0} tasks`, 'success')
+      if (r.rows_touched > 0) {
+        flash(`Synced ${r.rows_touched} task${r.rows_touched === 1 ? '' : 's'}`, 'success')
+      } else {
+        flash('Already up to date', 'info')
+      }
       await reload()
+      setStripTick(t => t + 1)
     } catch (e) {
       flash(`Sync error: ${e.message}`, 'error')
     } finally {
@@ -58,18 +88,12 @@ export default function App() {
   const handleReassign = async (taskId, newCrewId, reason = 'manual') => {
     try {
       await reassignTask(taskId, newCrewId, reason)
-      flash('Reassigned', 'success')
       await reload()
+      setStripTick(t => t + 1)
     } catch (e) {
       flash(`Reassign failed: ${e.message}`, 'error')
+      throw e
     }
-  }
-
-  const handleDrop = (newCrewId) => {
-    if (draggedTask && draggedTask.crew_id !== newCrewId) {
-      handleReassign(draggedTask.id, newCrewId, 'drag')
-    }
-    setDraggedTask(null)
   }
 
   return (
@@ -97,9 +121,9 @@ export default function App() {
       <div className="brand-seam" />
 
       {/* Day strip */}
-      <DayStrip date={date} onChange={setDate} taskCountsByDate={taskCountsByDate} />
+      <DayStrip date={date} onChange={handleDateChange} taskCountsByDate={taskCountsByDate} />
 
-      {/* Main grid: LeftPanel + MapView */}
+      {/* Main grid */}
       <div className="flex-1 flex overflow-hidden">
         <aside className="w-[320px] flex-shrink-0 border-r border-mortar-800 bg-mortar-950">
           <LeftPanel
@@ -109,10 +133,6 @@ export default function App() {
             onSelectCrew={setSelectedCrewId}
             selectedTaskId={selectedTaskId}
             onSelectTask={setSelectedTaskId}
-            draggedTask={draggedTask}
-            onDragStart={setDraggedTask}
-            onDragEnd={() => setDraggedTask(null)}
-            onDrop={handleDrop}
           />
         </aside>
         <main className="flex-1 relative">
@@ -125,7 +145,7 @@ export default function App() {
             fitResult={fitResult}
           />
           {error && (
-            <div className="absolute top-3 left-1/2 -translate-x-1/2 px-3 py-2 bg-red-900/80 text-red-100 text-xs rounded border border-red-700">
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 px-3 py-2 bg-red-900/80 text-red-100 text-xs rounded border border-red-700 z-[600]">
               {error}
             </div>
           )}
@@ -141,7 +161,6 @@ export default function App() {
         </main>
       </div>
 
-      {/* Fit-address panel + health bar */}
       <FitPanel
         crews={crews}
         onResult={setFitResult}
@@ -157,7 +176,13 @@ export default function App() {
         onSync={handleSync}
       />
 
-      {/* Toast */}
+      <SuggestPanel
+        crews={crews}
+        tasks={tasks}
+        onApplySwap={handleReassign}
+        onFlash={flash}
+      />
+
       {toast && (
         <div className={[
           'fixed bottom-24 left-1/2 -translate-x-1/2 px-4 py-2 rounded-lg text-sm text-white shadow-xl z-[3000]',

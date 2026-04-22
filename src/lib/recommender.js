@@ -1,19 +1,30 @@
 import { distanceMiles, driveMinutes } from './utils'
 
-// Compute total crew-day miles (home → task1 → task2 ... → homeward-ish)
+// Total crew-day miles: home → sorted stops → home (round-trip loop)
+// Only adds a home leg if home_lat/lng is populated.
 export function crewDayMiles(crew, crewTasks) {
   if (!crewTasks.length) return 0
-  const sorted = [...crewTasks].sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''))
+  const sorted = [...crewTasks].sort(
+    (a, b) => (a.start_time || 'zz').localeCompare(b.start_time || 'zz')
+  )
   let total = 0
-  let prevLat = crew?.home_lat ?? sorted[0]?.lat
-  let prevLng = crew?.home_lng ?? sorted[0]?.lng
-  sorted.forEach(t => {
+  const hasHome = crew?.home_lat != null && crew?.home_lng != null
+  let prevLat = hasHome ? crew.home_lat : sorted[0]?.lat
+  let prevLng = hasHome ? crew.home_lng : sorted[0]?.lng
+
+  for (const t of sorted) {
     if (t.lat != null && prevLat != null) {
       total += distanceMiles(prevLat, prevLng, t.lat, t.lng) || 0
     }
-    prevLat = t.lat ?? prevLat
-    prevLng = t.lng ?? prevLng
-  })
+    if (t.lat != null) {
+      prevLat = t.lat
+      prevLng = t.lng
+    }
+  }
+  // Return leg back home
+  if (hasHome && prevLat != null) {
+    total += distanceMiles(prevLat, prevLng, crew.home_lat, crew.home_lng) || 0
+  }
   return Math.round(total)
 }
 
@@ -21,19 +32,21 @@ export function crewDayDriveMin(crew, crewTasks) {
   return driveMinutes(crewDayMiles(crew, crewTasks))
 }
 
-// Core swap recommender:
-//   For each task, find the nearest other crew whose current day has tasks
-//   in the same cluster, and compute the miles delta if we moved this task
-//   to that crew. If delta < -5 miles total, suggest the swap.
+// Core swap recommender — suggests moving a task from crew A to crew B
+// when total miles across both crews drops by ≥ 8 miles.
+//
+// Only considers reps that BOTH have home_lat populated (otherwise the
+// mileage comparison is apples to oranges). Caps at 5 suggestions total.
 export function recommendSwaps(crews, tasks) {
-  const active = crews.filter(c => c.active !== false)
+  const active = crews.filter(c => c.active !== false && c.home_lat != null)
+  if (active.length < 2) return []
+
   const byCrew = new Map()
   active.forEach(c => byCrew.set(c.id, []))
   tasks.forEach(t => {
     if (t.crew_id && byCrew.has(t.crew_id)) byCrew.get(t.crew_id).push(t)
   })
 
-  // Baseline miles per crew
   const baseline = new Map()
   active.forEach(c => baseline.set(c.id, crewDayMiles(c, byCrew.get(c.id) || [])))
 
@@ -45,8 +58,6 @@ export function recommendSwaps(crews, tasks) {
 
     active.forEach(toCrew => {
       if (toCrew.id === task.crew_id) return
-      // Skip cross-market swaps
-      if (fromCrew.market && toCrew.market && fromCrew.market !== toCrew.market) return
 
       const fromTasks = byCrew.get(fromCrew.id) || []
       const toTasks = byCrew.get(toCrew.id) || []
@@ -57,10 +68,11 @@ export function recommendSwaps(crews, tasks) {
       const newTotal = crewDayMiles(fromCrew, newFrom) + crewDayMiles(toCrew, newTo)
       const delta = newTotal - oldTotal
 
-      if (delta <= -5) {
+      if (delta <= -8) {
         suggestions.push({
           task_id: task.id,
           task_name: task.job_name,
+          task_address: task.job_address,
           from_crew_id: fromCrew.id,
           from_crew_name: fromCrew.name,
           to_crew_id: toCrew.id,
@@ -79,35 +91,31 @@ export function recommendSwaps(crews, tasks) {
     if (!cur || s.miles_saved > cur.miles_saved) bestByTask.set(s.task_id, s)
   })
 
-  return Array.from(bestByTask.values()).sort((a, b) => b.miles_saved - a.miles_saved)
+  return Array.from(bestByTask.values())
+    .sort((a, b) => b.miles_saved - a.miles_saved)
+    .slice(0, 5)
 }
 
-// Health score: 0-100 based on orphans + crossmarket tasks + high drive time
+// Health score: orphans + high per-rep mileage
 export function dayHealth(crews, tasks) {
-  if (!tasks.length) return { score: 100, orphans: 0, crossMarket: 0, avgMiles: 0 }
+  if (!tasks.length) return { score: 100, orphans: 0, avgMiles: 0, totalSaving: 0 }
   const orphans = tasks.filter(t => !t.crew_id).length
   const active = crews.filter(c => c.active !== false)
-  let crossMarket = 0
-  tasks.forEach(t => {
-    const c = active.find(x => x.id === t.crew_id)
-    if (c && c.market && t.lat != null) {
-      // Simple distance-from-hub check
-      const d = distanceMiles(c.home_lat, c.home_lng, t.lat, t.lng)
-      if (d > 60) crossMarket += 1
-    }
-  })
+
   const byCrew = new Map()
   active.forEach(c => byCrew.set(c.id, []))
   tasks.forEach(t => { if (t.crew_id && byCrew.has(t.crew_id)) byCrew.get(t.crew_id).push(t) })
+
   const totals = Array.from(byCrew.entries()).map(([id, ts]) => {
     const c = active.find(x => x.id === id)
     return crewDayMiles(c, ts)
   }).filter(x => x > 0)
+
   const avgMiles = totals.length ? Math.round(totals.reduce((a, b) => a + b, 0) / totals.length) : 0
 
   const orphanPenalty = orphans * 8
-  const crossPenalty = crossMarket * 5
-  const mileagePenalty = Math.max(0, (avgMiles - 60) * 0.4)
-  const score = Math.max(0, Math.round(100 - orphanPenalty - crossPenalty - mileagePenalty))
-  return { score, orphans, crossMarket, avgMiles }
+  const mileagePenalty = Math.max(0, (avgMiles - 80) * 0.3)
+  const score = Math.max(0, Math.round(100 - orphanPenalty - mileagePenalty))
+
+  return { score, orphans, avgMiles }
 }

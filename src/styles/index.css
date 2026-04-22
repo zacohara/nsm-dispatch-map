@@ -166,6 +166,37 @@ html, body, #root {
   50%      { box-shadow: 0 2px 10px rgba(0,0,0,0.6), 0 0 0 16px rgba(74,157,207,0); }
 }
 
+/* ── HOME PINS ──────────────────────────────────────────── */
+.home-pin {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 2px solid rgba(255,255,255,0.9);
+  box-shadow: 0 3px 8px rgba(0,0,0,0.5);
+  display: grid;
+  place-items: center;
+  transform: rotate(-4deg);
+  transition: opacity 0.25s, filter 0.25s, transform 0.25s;
+  opacity: 0.75;
+}
+.home-pin.active {
+  opacity: 1;
+  transform: rotate(-4deg) scale(1.12);
+  box-shadow: 0 4px 14px rgba(0,0,0,0.6), 0 0 0 3px rgba(255,255,255,0.1);
+}
+.home-pin span {
+  font-size: 14px;
+  transform: rotate(4deg);
+  filter: grayscale(0.15);
+  line-height: 1;
+}
+
+/* ── SUGGEST BUTTON PULSE ──────────────────────────────── */
+@keyframes pulse-suggest {
+  0%, 100% { box-shadow: 0 6px 18px rgba(74,157,207,0.45), 0 0 0 0 rgba(74,157,207,0.4); }
+  50%      { box-shadow: 0 6px 22px rgba(74,157,207,0.55), 0 0 0 10px rgba(74,157,207,0); }
+}
+
 /* ── AUTOCOMPLETE DROPDOWN ──────────────────────────────── */
 .autocomplete-dropdown {
   position: absolute;

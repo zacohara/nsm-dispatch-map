@@ -2,6 +2,10 @@ import { useEffect, useMemo, useRef } from 'react'
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import { formatTime, crewColor } from '../lib/utils'
+import { crewDayMiles, crewDayDriveMin } from '../lib/recommender'
+
+// JT job URL — direct link to open a job in JobTread
+const JT_JOB_URL = (jobId) => `https://app.jobtread.com/jobs/${jobId}`
 
 // Fit to a set of points when the set identity changes
 function FitBounds({ points, trigger }) {
@@ -15,7 +19,7 @@ function FitBounds({ points, trigger }) {
   return null
 }
 
-// Pan to the selected task so the glowing pin is centered
+// Pan to the selected task
 function PanToSelected({ lat, lng, trigger }) {
   const map = useMap()
   useEffect(() => {
@@ -26,7 +30,7 @@ function PanToSelected({ lat, lng, trigger }) {
   return null
 }
 
-// Teardrop pin with initials — DEFAULT MODE (no rep selected)
+// Teardrop pin with initials — DEFAULT MODE
 function teardropIcon(color, label, isOrphan, dimmed) {
   const classes = ['dispatch-pin']
   if (isOrphan) classes.push('orphan')
@@ -40,7 +44,7 @@ function teardropIcon(color, label, isOrphan, dimmed) {
   })
 }
 
-// Clean numbered disc — ROUTE MODE. No avatar. Number in rep's color, white text.
+// Numbered disc — ROUTE MODE
 function numberedIcon(color, n, isHighlighted) {
   const size = isHighlighted ? 42 : 34
   const cls = 'route-pin' + (isHighlighted ? ' highlighted' : '')
@@ -50,6 +54,18 @@ function numberedIcon(color, n, isHighlighted) {
     iconSize: [size, size],
     iconAnchor: [size / 2, size / 2],
     popupAnchor: [0, -size / 2],
+  })
+}
+
+// Home marker — 🏠 pin in rep's color
+function homeIcon(color, isActive) {
+  const cls = 'home-pin' + (isActive ? ' active' : '')
+  return L.divIcon({
+    className: '',
+    html: `<div class="${cls}" style="background:${color}"><span>🏠</span></div>`,
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+    popupAnchor: [0, -14],
   })
 }
 
@@ -64,8 +80,9 @@ function fitIcon() {
   })
 }
 
-// PopupCard — shared popup content including rep avatar
+// Shared popup content
 function PopupCard({ task, rep, stopNum, stopTotal }) {
+  const jtUrl = task.jt_job_id ? JT_JOB_URL(task.jt_job_id) : null
   return (
     <div className="popup-card">
       {stopNum != null && (
@@ -105,6 +122,16 @@ function PopupCard({ task, rep, stopNum, stopTotal }) {
           </div>
         </div>
       </div>
+      {jtUrl && (
+        <a
+          href={jtUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-2 block text-center text-[11px] font-semibold text-ns-400 hover:text-ns-300 pt-2 border-t border-mortar-800"
+        >
+          Open in JobTread ↗
+        </a>
+      )}
     </div>
   )
 }
@@ -141,17 +168,35 @@ export default function MapView({
     [selectedCrewId, crews]
   )
 
+  // Route positions — start at home, hit each stop in order, return home
   const routePositions = useMemo(() => {
     if (!selectedTasks.length) return null
-    return selectedTasks.map(t => [t.lat, t.lng])
-  }, [selectedTasks])
+    const pts = []
+    const hasHome = selectedCrew?.home_lat != null && selectedCrew?.home_lng != null
+    if (hasHome) pts.push([selectedCrew.home_lat, selectedCrew.home_lng])
+    selectedTasks.forEach(t => pts.push([t.lat, t.lng]))
+    if (hasHome) pts.push([selectedCrew.home_lat, selectedCrew.home_lng])
+    return pts
+  }, [selectedTasks, selectedCrew])
+
+  // All reps that have a home coord — used to render home markers
+  const repsWithHome = useMemo(
+    () => crews.filter(c => c.home_lat != null && c.home_lng != null),
+    [crews]
+  )
 
   const boundsPoints = useMemo(() => {
-    if (selectedTasks.length) return selectedTasks
+    if (selectedTasks.length) {
+      const pts = [...selectedTasks]
+      if (selectedCrew?.home_lat != null) {
+        pts.push({ lat: selectedCrew.home_lat, lng: selectedCrew.home_lng })
+      }
+      return pts
+    }
     const pts = [...visible]
     if (fitResult?.lat != null) pts.push({ lat: fitResult.lat, lng: fitResult.lng })
     return pts
-  }, [selectedTasks, visible, fitResult])
+  }, [selectedTasks, selectedCrew, visible, fitResult])
 
   const selectedTaskCoords = useMemo(() => {
     if (!selectedTaskId) return { lat: null, lng: null }
@@ -163,104 +208,144 @@ export default function MapView({
   const boundsTrigger = `${selectedCrewId || 'all'}|${visible.length}|${fitResult?.lat || ''}`
   const panTrigger = selectedTaskId || ''
 
-  return (
-    <MapContainer
-      ref={mapRef}
-      center={defaultCenter}
-      zoom={10}
-      className="h-full w-full"
-      zoomControl={true}
-    >
-      <TileLayer
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
-        url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-      />
+  // Route totals for the header strip
+  const routeTotals = useMemo(() => {
+    if (!selectedCrew || !selectedTasks.length) return null
+    const miles = crewDayMiles(selectedCrew, selectedTasks)
+    const driveMin = crewDayDriveMin(selectedCrew, selectedTasks)
+    const firstTime = selectedTasks[0]?.start_time
+    const lastTask = selectedTasks[selectedTasks.length - 1]
+    const lastTime = lastTask?.start_time
+    return { miles, driveMin, firstTime, lastTime, stops: selectedTasks.length }
+  }, [selectedCrew, selectedTasks])
 
-      {/* ROUTE MODE: numbered discs + flowing-dot line */}
-      {selectedCrewId && selectedTasks.length > 0 && (
-        <>
-          {selectedTasks.map((t, i) => {
-            const color = selectedCrew?.color || '#4a9dcf'
-            const isHighlighted = t.id === selectedTaskId
-            return (
-              <Marker
-                key={`route-${t.id}`}
-                position={[t.lat, t.lng]}
-                icon={numberedIcon(color, i + 1, isHighlighted)}
-                eventHandlers={{ click: () => onSelectTask?.(t.id) }}
-                zIndexOffset={isHighlighted ? 2000 : 500 + i}
-              >
-                <Popup>
-                  <PopupCard task={t} rep={selectedCrew} stopNum={i + 1} stopTotal={selectedTasks.length} />
-                </Popup>
-              </Marker>
-            )
-          })}
-          {routePositions && routePositions.length >= 2 && (
-            <>
-              {/* Base path — solid, low opacity */}
-              <Polyline
-                positions={routePositions}
-                pathOptions={{
-                  color: selectedCrew?.color || '#4a9dcf',
-                  weight: 3,
-                  opacity: 0.55,
-                }}
-              />
-              {/* Flowing-dots overlay */}
-              <Polyline
-                positions={routePositions}
-                pathOptions={{
-                  color: selectedCrew?.color || '#4a9dcf',
-                  weight: 3,
-                  opacity: 0.95,
-                  dashArray: '2 14',
-                  lineCap: 'round',
-                  className: 'route-line-flow',
-                }}
-              />
-            </>
-          )}
-        </>
+  return (
+    <div className="h-full w-full relative">
+      {/* Route totals strip */}
+      {routeTotals && selectedCrew && (
+        <div
+          className="absolute top-3 left-1/2 -translate-x-1/2 z-[500] bg-mortar-900/95 backdrop-blur border border-mortar-800 rounded-lg shadow-xl px-4 py-2 flex items-center gap-4 pointer-events-none"
+          style={{ boxShadow: `0 6px 20px rgba(0,0,0,0.5), 0 0 0 1px ${selectedCrew.color}40` }}
+        >
+          <div className="flex items-center gap-2">
+            <div
+              className="w-2.5 h-2.5 rounded-full"
+              style={{ background: selectedCrew.color }}
+            />
+            <span className="font-display text-sm font-bold text-cream">{selectedCrew.name}</span>
+          </div>
+          <div className="h-5 w-px bg-mortar-700" />
+          <div className="flex items-center gap-3 text-[11px]">
+            <span className="text-mortar-300">
+              <strong className="text-cream">{routeTotals.stops}</strong> stop{routeTotals.stops === 1 ? '' : 's'}
+            </span>
+            <span className="text-mortar-300">
+              <strong className="text-cream">{routeTotals.miles}</strong>mi
+            </span>
+            <span className="text-mortar-300">
+              <strong className="text-cream">{Math.floor(routeTotals.driveMin / 60)}h {routeTotals.driveMin % 60}m</strong> drive
+            </span>
+            {routeTotals.firstTime && (
+              <span className="text-mortar-500">
+                {formatTime(routeTotals.firstTime)}–{formatTime(routeTotals.lastTime) || '—'}
+              </span>
+            )}
+          </div>
+        </div>
       )}
 
-      {/* DEFAULT MODE: small teardrops, no faces */}
-      {!selectedCrewId && visible.map(t => {
-        const crewObj = crews.find(c => c.id === t.crew_id)
-        const color = crewColor(t.crew_id, crews)
-        const isOrphan = !t.crew_id
-        const initials = crewObj?.name?.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase() || ''
-        const isSelected = t.id === selectedTaskId
-        return (
-          <Marker
-            key={t.id}
-            position={[t.lat, t.lng]}
-            icon={teardropIcon(color, initials, isOrphan, false)}
-            eventHandlers={{ click: () => onSelectTask?.(t.id) }}
-            zIndexOffset={isSelected ? 2000 : 0}
-          >
-            <Popup>
-              <PopupCard task={t} rep={crewObj} />
-            </Popup>
-          </Marker>
-        )
-      })}
+      <MapContainer
+        ref={mapRef}
+        center={defaultCenter}
+        zoom={10}
+        className="h-full w-full"
+        zoomControl={true}
+      >
+        <TileLayer
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
+          url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+        />
 
-      {/* Route mode: dim other reps' pins for context */}
-      {selectedCrewId && visible
-        .filter(t => t.crew_id !== selectedCrewId)
-        .map(t => {
+        {/* Home markers — always rendered (dim the non-selected ones in route mode) */}
+        {repsWithHome.map(rep => {
+          const isActive = !selectedCrewId || rep.id === selectedCrewId
+          return (
+            <Marker
+              key={`home-${rep.id}`}
+              position={[rep.home_lat, rep.home_lng]}
+              icon={homeIcon(rep.color, isActive)}
+              zIndexOffset={isActive ? 400 : 50}
+            >
+              <Popup>
+                <div className="text-xs">
+                  <div className="font-bold text-mortar-300">{rep.name}'s home base</div>
+                  <div className="text-mortar-500 text-[11px] mt-0.5">{rep.home_town || 'Home'}</div>
+                </div>
+              </Popup>
+            </Marker>
+          )
+        })}
+
+        {/* ROUTE MODE: numbered discs + flowing-dot line */}
+        {selectedCrewId && selectedTasks.length > 0 && (
+          <>
+            {selectedTasks.map((t, i) => {
+              const color = selectedCrew?.color || '#4a9dcf'
+              const isHighlighted = t.id === selectedTaskId
+              return (
+                <Marker
+                  key={`route-${t.id}`}
+                  position={[t.lat, t.lng]}
+                  icon={numberedIcon(color, i + 1, isHighlighted)}
+                  eventHandlers={{ click: () => onSelectTask?.(t.id) }}
+                  zIndexOffset={isHighlighted ? 2000 : 500 + i}
+                >
+                  <Popup>
+                    <PopupCard task={t} rep={selectedCrew} stopNum={i + 1} stopTotal={selectedTasks.length} />
+                  </Popup>
+                </Marker>
+              )
+            })}
+            {routePositions && routePositions.length >= 2 && (
+              <>
+                <Polyline
+                  positions={routePositions}
+                  pathOptions={{
+                    color: selectedCrew?.color || '#4a9dcf',
+                    weight: 3,
+                    opacity: 0.55,
+                  }}
+                />
+                <Polyline
+                  positions={routePositions}
+                  pathOptions={{
+                    color: selectedCrew?.color || '#4a9dcf',
+                    weight: 3,
+                    opacity: 0.95,
+                    dashArray: '2 14',
+                    lineCap: 'round',
+                    className: 'route-line-flow',
+                  }}
+                />
+              </>
+            )}
+          </>
+        )}
+
+        {/* DEFAULT MODE: small colored teardrops */}
+        {!selectedCrewId && visible.map(t => {
           const crewObj = crews.find(c => c.id === t.crew_id)
           const color = crewColor(t.crew_id, crews)
           const isOrphan = !t.crew_id
           const initials = crewObj?.name?.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase() || ''
+          const isSelected = t.id === selectedTaskId
           return (
             <Marker
-              key={`dim-${t.id}`}
+              key={t.id}
               position={[t.lat, t.lng]}
-              icon={teardropIcon(color, initials, isOrphan, true)}
+              icon={teardropIcon(color, initials, isOrphan, false)}
               eventHandlers={{ click: () => onSelectTask?.(t.id) }}
-              zIndexOffset={0}
+              zIndexOffset={isSelected ? 2000 : 0}
             >
               <Popup>
                 <PopupCard task={t} rep={crewObj} />
@@ -269,22 +354,47 @@ export default function MapView({
           )
         })}
 
-      {fitResult?.lat != null && (
-        <Marker position={[fitResult.lat, fitResult.lng]} icon={fitIcon()} zIndexOffset={2500}>
-          <Popup>
-            <div className="text-xs">
-              <div className="font-bold text-ns-400 mb-1">Lead address</div>
-              <div className="text-mortar-300">{fitResult.address}</div>
-              <div className="text-[10px] text-mortar-500 mt-1">
-                {fitResult.suggestions?.length || 0} recommended slot{fitResult.suggestions?.length === 1 ? '' : 's'}
-              </div>
-            </div>
-          </Popup>
-        </Marker>
-      )}
+        {/* Route mode: dim others */}
+        {selectedCrewId && visible
+          .filter(t => t.crew_id !== selectedCrewId)
+          .map(t => {
+            const crewObj = crews.find(c => c.id === t.crew_id)
+            const color = crewColor(t.crew_id, crews)
+            const isOrphan = !t.crew_id
+            const initials = crewObj?.name?.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase() || ''
+            return (
+              <Marker
+                key={`dim-${t.id}`}
+                position={[t.lat, t.lng]}
+                icon={teardropIcon(color, initials, isOrphan, true)}
+                eventHandlers={{ click: () => onSelectTask?.(t.id) }}
+                zIndexOffset={0}
+              >
+                <Popup>
+                  <PopupCard task={t} rep={crewObj} />
+                </Popup>
+              </Marker>
+            )
+          })}
 
-      <FitBounds points={boundsPoints} trigger={boundsTrigger} />
-      <PanToSelected lat={selectedTaskCoords.lat} lng={selectedTaskCoords.lng} trigger={panTrigger} />
-    </MapContainer>
+        {/* Fit-search destination */}
+        {fitResult?.lat != null && (
+          <Marker position={[fitResult.lat, fitResult.lng]} icon={fitIcon()} zIndexOffset={2500}>
+            <Popup>
+              <div className="text-xs">
+                <div className="font-bold text-ns-400 mb-1">Lead address</div>
+                <div className="text-mortar-300">{fitResult.address}</div>
+                <div className="text-[10px] text-mortar-500 mt-1">
+                  {fitResult.suggestions?.length || 0} recommended slot{fitResult.suggestions?.length === 1 ? '' : 's'}
+                </div>
+              </div>
+            </Popup>
+          </Marker>
+        )}
+
+        <FitBounds points={boundsPoints} trigger={boundsTrigger} />
+        <PanToSelected lat={selectedTaskCoords.lat} lng={selectedTaskCoords.lng} trigger={panTrigger} />
+      </MapContainer>
+    </div>
   )
 }

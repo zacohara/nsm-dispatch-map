@@ -13,7 +13,7 @@ function timeAgo(iso) {
   return `${Math.floor(hrs / 24)}d ago`
 }
 
-export default function HealthPanel({ crews, tasks, syncInfo, syncing, onSync, onOptimize }) {
+export default function HealthPanel({ crews, tasks, syncInfo, syncing, onSync }) {
   const health = useMemo(() => dayHealth(crews, tasks), [crews, tasks])
 
   const scoreColor =
@@ -31,9 +31,6 @@ export default function HealthPanel({ crews, tasks, syncInfo, syncing, onSync, o
       <div className="flex items-center gap-3 text-[11px] text-mortar-300">
         {health.orphans > 0 && (
           <span className="text-amber-400">⚠ {health.orphans} unassigned</span>
-        )}
-        {health.crossMarket > 0 && (
-          <span className="text-orange-400">⚑ {health.crossMarket} far from hub</span>
         )}
         <span className="text-mortar-500">⌀ {health.avgMiles}mi/rep</span>
       </div>

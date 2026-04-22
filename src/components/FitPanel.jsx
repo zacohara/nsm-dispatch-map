@@ -44,7 +44,6 @@ export default function FitPanel({ crews, onResult, currentResult, onClear, onFl
   const [query, setQuery] = useState('')
   const [duration, setDuration] = useState(2)
   const [searching, setSearching] = useState(false)
-  const [open, setOpen] = useState(false)
   const [suggestions, setSuggestions] = useState([])
   const [activeIdx, setActiveIdx] = useState(-1)
   const [dropdownOpen, setDropdownOpen] = useState(false)
@@ -116,7 +115,6 @@ export default function FitPanel({ crews, onResult, currentResult, onClear, onFl
   const handleKeyDown = (e) => {
     if (!dropdownOpen || suggestions.length === 0) {
       if (e.key === 'Enter' && query.trim().length >= 3) {
-        // Fallback: search the raw text if there's no dropdown
         e.preventDefault()
         runSearch({ address: query.trim(), lat: null, lng: null })
       }

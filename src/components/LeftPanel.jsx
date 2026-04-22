@@ -10,14 +10,9 @@ export default function LeftPanel({
   onSelectCrew,
   selectedTaskId,
   onSelectTask,
-  draggedTask,
-  onDragStart,
-  onDragEnd,
-  onDrop,
 }) {
   const [showIdle, setShowIdle] = useState(false)
 
-  // Tasks grouped by rep + unassigned bucket
   const groups = useMemo(() => {
     const m = new Map()
     crews.forEach(c => m.set(c.id, []))
@@ -29,7 +24,6 @@ export default function LeftPanel({
     return m
   }, [crews, tasks])
 
-  // Split reps into active (has tasks today) and idle (zero tasks)
   const { activeReps, idleReps, unassigned } = useMemo(() => {
     const active = []
     const idle = []
@@ -38,7 +32,6 @@ export default function LeftPanel({
       if (t.length > 0) active.push({ crew: c, tasks: t })
       else idle.push(c)
     }
-    // Sort active by task count desc, tiebreak by name
     active.sort((a, b) => b.tasks.length - a.tasks.length || a.crew.name.localeCompare(b.crew.name))
     idle.sort((a, b) => a.name.localeCompare(b.name))
     return {
@@ -52,24 +45,18 @@ export default function LeftPanel({
     const miles = isUnassigned ? null : crewDayMiles(crew, crewTasks)
     const driveMin = isUnassigned ? null : crewDayDriveMin(crew, crewTasks)
     const isSelected = !isUnassigned && selectedCrewId === crew.id
-    const isDropTarget = draggedTask && !isUnassigned && draggedTask.crew_id !== crew.id
     const accent = isUnassigned ? '#6d675d' : crew.color
 
     return (
       <div
         key={isUnassigned ? '__unassigned__' : crew.id}
         className={[
-          'crew-dropzone rounded-lg mb-2 border transition-all overflow-hidden',
-          isSelected ? 'border-ns-400 bg-mortar-900 shadow-lg shadow-ns-900/30' : 'border-mortar-800 bg-mortar-900/60 hover:border-mortar-700',
-          isDropTarget ? 'drop-target' : '',
+          'rounded-lg mb-2 border transition-all overflow-hidden',
+          isSelected
+            ? 'border-ns-400 bg-mortar-900 shadow-lg shadow-ns-900/30'
+            : 'border-mortar-800 bg-mortar-900/60 hover:border-mortar-700',
         ].join(' ')}
-        onDragOver={e => { if (!isUnassigned) e.preventDefault() }}
-        onDrop={e => {
-          e.preventDefault()
-          if (!isUnassigned) onDrop(crew.id)
-        }}
       >
-        {/* Colored accent bar */}
         {isSelected && (
           <div className="h-0.5" style={{ background: accent }} />
         )}
@@ -88,9 +75,19 @@ export default function LeftPanel({
             <div className="text-sm font-semibold text-mortar-300 truncate leading-tight">
               {isUnassigned ? 'Unassigned' : crew.name}
             </div>
-            {!isUnassigned && crewTasks.length > 0 && miles > 0 && (
-              <div className="text-[10px] text-mortar-500 font-mono mt-0.5">
-                {miles}mi · {driveMin}m drive
+            {!isUnassigned && (
+              <div className="text-[10px] text-mortar-500 mt-0.5 flex items-center gap-2 truncate">
+                {crew.home_town && (
+                  <span className="flex items-center gap-0.5">
+                    <span>🏠</span>
+                    <span className="truncate">{crew.home_town.replace(', IL', '')}</span>
+                  </span>
+                )}
+                {crewTasks.length > 0 && miles > 0 && (
+                  <span className="font-mono">
+                    {crew.home_town && '·'} {miles}mi · {driveMin}m
+                  </span>
+                )}
               </div>
             )}
           </div>
@@ -112,16 +109,12 @@ export default function LeftPanel({
               return (
                 <div
                   key={t.id}
-                  draggable
-                  onDragStart={() => onDragStart(t)}
-                  onDragEnd={onDragEnd}
                   onClick={() => onSelectTask(t.id === selectedTaskId ? null : t.id)}
                   className={[
-                    'task-card text-xs rounded border pl-2 pr-2 py-1.5 flex items-start gap-2',
+                    'cursor-pointer text-xs rounded border pl-2 pr-2 py-1.5 flex items-start gap-2 transition-colors',
                     selectedTaskId === t.id
                       ? 'border-ns-400 bg-mortar-800 shadow-md'
                       : 'border-mortar-800 bg-mortar-950 hover:bg-mortar-800',
-                    draggedTask?.id === t.id ? 'dragging' : '',
                   ].join(' ')}
                 >
                   {stopNum != null && (
@@ -168,13 +161,9 @@ export default function LeftPanel({
         </div>
       </div>
       <div className="flex-1 overflow-y-auto p-2">
-        {/* Active reps — sorted by task count desc */}
         {activeReps.map(({ crew, tasks }) => renderGroup(crew, tasks))}
-
-        {/* Unassigned — only if populated, after active reps */}
         {unassigned.length > 0 && renderGroup(null, unassigned, true)}
 
-        {/* Idle reps — collapsed section at bottom */}
         {idleReps.length > 0 && (
           <div className="mt-3 pt-2 border-t border-mortar-800">
             <button
