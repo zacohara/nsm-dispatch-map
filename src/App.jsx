@@ -75,22 +75,20 @@ export default function App() {
   return (
     <div className="h-screen flex flex-col bg-mortar-950">
       {/* Header */}
-      <header className="px-5 py-3 bg-mortar-900 flex items-center justify-between border-b border-mortar-800">
+      <header className="px-5 py-3 brick-texture flex items-center justify-between border-b border-mortar-800 relative">
         <div className="flex items-center gap-3">
-          <img src="/ns-mark.png" alt="" className="w-10 h-10 object-contain" />
+          <img src="/ns-mark.png" alt="" className="w-11 h-11 object-contain drop-shadow-lg" />
           <div className="flex flex-col leading-none">
-            <div className="font-display text-cream text-[22px] tracking-tight">
+            <div className="font-display text-cream text-[24px] tracking-tight">
               North Shore <span className="text-ns-400">Dispatch</span>
             </div>
-            <div className="flex items-center gap-1.5 mt-0.5">
-              <span className="h-px w-4 bg-mortar-500" />
-              <span className="text-[9px] uppercase tracking-[0.2em] text-mortar-500">Since 1978</span>
-              <span className="h-px w-4 bg-mortar-500" />
+            <div className="mt-1 since-stamp">
+              <span className="bar" /> Since 1978 <span className="bar" />
             </div>
           </div>
         </div>
         <div className="text-right">
-          <div className="text-[10px] uppercase tracking-wider text-mortar-500">Today</div>
+          <div className="text-[9px] uppercase tracking-[0.25em] text-mortar-500 font-display">Today</div>
           <div className="text-sm font-semibold text-mortar-300">
             {loading ? 'Loading…' : `${fmtDate(date, 'long')} · ${tasks.length} task${tasks.length === 1 ? '' : 's'}`}
           </div>

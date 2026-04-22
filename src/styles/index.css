@@ -34,26 +34,39 @@ html, body, #root {
   letter-spacing: 0.01em;
 }
 
+/* ── Subtle brick texture for the header slab ──────────── */
+.brick-texture {
+  background-color: var(--mortar-900);
+  background-image:
+    repeating-linear-gradient(
+      0deg,
+      transparent 0, transparent 18px,
+      rgba(255,255,255,0.018) 18px, rgba(255,255,255,0.018) 19px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      transparent 0, transparent 48px,
+      rgba(255,255,255,0.018) 48px, rgba(255,255,255,0.018) 49px
+    );
+}
+
 /* ── Leaflet dark-theme overrides ───────────────────────── */
 .leaflet-container {
   background: var(--mortar-900);
   font-family: inherit;
 }
-
 .leaflet-control-attribution {
   background: rgba(14, 13, 12, 0.7) !important;
   color: var(--mortar-500) !important;
   font-size: 10px !important;
 }
 .leaflet-control-attribution a { color: var(--mortar-300) !important; }
-
 .leaflet-control-zoom a {
   background: var(--mortar-900) !important;
   color: var(--mortar-300) !important;
   border-color: var(--mortar-800) !important;
 }
 .leaflet-control-zoom a:hover { background: var(--mortar-800) !important; }
-
 .leaflet-popup-content-wrapper, .leaflet-popup-tip {
   background: var(--mortar-900) !important;
   color: var(--mortar-300) !important;
@@ -61,10 +74,10 @@ html, body, #root {
   box-shadow: 0 8px 24px rgba(0,0,0,0.5) !important;
 }
 
-/* ── Dispatch pins ──────────────────────────────────────── */
+/* ── Teardrop pins ──────────────────────────────────────── */
 .dispatch-pin {
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   border-radius: 50% 50% 50% 0;
   transform: rotate(-45deg);
   border: 2px solid rgba(255,255,255,0.92);
@@ -72,6 +85,7 @@ html, body, #root {
   display: grid;
   place-items: center;
   transition: transform 0.2s ease, filter 0.2s ease, opacity 0.2s ease;
+  overflow: hidden;
 }
 .dispatch-pin span {
   transform: rotate(45deg);
@@ -80,9 +94,16 @@ html, body, #root {
   font-weight: 700;
   letter-spacing: 0.02em;
 }
+.dispatch-pin .pin-avatar {
+  transform: rotate(45deg);
+  width: 36px;
+  height: 36px;
+  object-fit: cover;
+  border-radius: 50%;
+}
 .dispatch-pin.dimmed {
-  opacity: 0.18;
-  filter: saturate(0.4);
+  opacity: 0.2;
+  filter: saturate(0.3);
 }
 .dispatch-pin.orphan {
   background: var(--mortar-500) !important;
@@ -93,43 +114,69 @@ html, body, #root {
   50%      { box-shadow: 0 3px 10px rgba(0,0,0,0.55), 0 0 0 10px rgba(74,157,207,0); }
 }
 
-/* Numbered route pin — shown when a rep is selected, in stop-order */
+/* ── Numbered route pin ─────────────────────────────────── */
 .route-pin {
-  width: 34px;
-  height: 34px;
   border-radius: 50%;
-  border: 3px solid rgba(255,255,255,0.95);
-  box-shadow: 0 4px 14px rgba(0,0,0,0.65);
+  border: 3px solid rgba(255,255,255,0.96);
+  box-shadow: 0 4px 14px rgba(0,0,0,0.7);
   display: grid;
   place-items: center;
+  position: relative;
+  overflow: visible;
   animation: pin-pop 0.35s cubic-bezier(.34,1.56,.64,1) both;
+  transition: width 0.25s, height 0.25s, box-shadow 0.25s;
 }
-.route-pin span {
+.route-pin.highlighted {
+  animation: pin-pop 0.35s cubic-bezier(.34,1.56,.64,1) both, pin-glow 1.6s ease-in-out infinite;
+}
+.route-pin .pin-avatar-full {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+}
+.route-pin.avatar-missing .pin-avatar-full { display: none; }
+.route-pin-num {
+  position: absolute;
+  bottom: -4px;
+  right: -4px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 10px;
   color: white;
   font-family: 'Barlow Condensed', sans-serif;
-  font-size: 17px;
   font-weight: 800;
-  line-height: 1;
+  font-size: 13px;
+  line-height: 20px;
+  text-align: center;
+  border: 2px solid var(--cream);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.5);
 }
 @keyframes pin-pop {
   0%   { transform: scale(0); opacity: 0; }
   60%  { transform: scale(1.15); opacity: 1; }
   100% { transform: scale(1); opacity: 1; }
 }
+@keyframes pin-glow {
+  0%, 100% { box-shadow: 0 4px 14px rgba(0,0,0,0.7), 0 0 0 0 rgba(74,157,207,0.7); }
+  50%      { box-shadow: 0 4px 14px rgba(0,0,0,0.7), 0 0 0 14px rgba(74,157,207,0); }
+}
 
 /* Animated dashed route line */
 .route-line {
   stroke-dasharray: 10 8;
   animation: dash-march 1.8s linear infinite;
+  filter: drop-shadow(0 0 4px rgba(74,157,207,0.3));
 }
 @keyframes dash-march {
   to { stroke-dashoffset: -36; }
 }
 
-/* Fit-search result highlight pin (NS blue ring pulse) */
+/* Fit-search pin */
 .fit-pin {
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   background: var(--ns-400);
   border: 3px solid var(--cream);
@@ -138,7 +185,7 @@ html, body, #root {
 }
 @keyframes pulse-fit {
   0%, 100% { box-shadow: 0 2px 10px rgba(0,0,0,0.6), 0 0 0 0 rgba(74,157,207,0.75); }
-  50%      { box-shadow: 0 2px 10px rgba(0,0,0,0.6), 0 0 0 14px rgba(74,157,207,0); }
+  50%      { box-shadow: 0 2px 10px rgba(0,0,0,0.6), 0 0 0 16px rgba(74,157,207,0); }
 }
 
 /* ── Scrollbar ──────────────────────────────────────────── */
@@ -150,7 +197,7 @@ html, body, #root {
 /* ── Drag affordance ────────────────────────────────────── */
 .task-card {
   cursor: grab;
-  transition: transform 0.12s, background 0.12s;
+  transition: transform 0.12s, background 0.12s, border-color 0.12s;
 }
 .task-card:active { cursor: grabbing; }
 .task-card.dragging { opacity: 0.4; }
@@ -159,13 +206,41 @@ html, body, #root {
   outline-offset: -4px;
 }
 
-/* ── Brand seam ─────────────────────────────────────────── */
+/* ── NS brand seams ─────────────────────────────────────── */
 .brand-seam {
   background-image: linear-gradient(to right,
     transparent 0%,
     rgba(74,157,207,0.45) 20%,
-    rgba(74,157,207,0.8) 50%,
+    rgba(74,157,207,0.85) 50%,
     rgba(74,157,207,0.45) 80%,
     transparent 100%);
   height: 2px;
+}
+.brand-seam-subtle {
+  background-image: linear-gradient(to right,
+    transparent 0%,
+    rgba(74,157,207,0.2) 40%,
+    rgba(74,157,207,0.35) 50%,
+    rgba(74,157,207,0.2) 60%,
+    transparent 100%);
+  height: 1px;
+}
+
+/* Stamped "Since 1978" ribbon look for header */
+.since-stamp {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 700;
+  font-size: 9px;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--mortar-500);
+}
+.since-stamp .bar {
+  display: inline-block;
+  height: 1px;
+  width: 14px;
+  background: var(--mortar-500);
 }
