@@ -1,0 +1,93 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --brick: #b04a3c;
+  --mortar-950: #0e0d0c;
+  --mortar-900: #1a1816;
+  --mortar-800: #2c2a26;
+  --mortar-500: #6d675d;
+  --mortar-300: #c5beb3;
+}
+
+html, body, #root {
+  height: 100%;
+  background: var(--mortar-950);
+  color: var(--mortar-300);
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Leaflet overrides for dark theme */
+.leaflet-container {
+  background: var(--mortar-900);
+  font-family: inherit;
+}
+
+.leaflet-control-attribution {
+  background: rgba(14, 13, 12, 0.7) !important;
+  color: var(--mortar-500) !important;
+  font-size: 10px !important;
+}
+.leaflet-control-attribution a { color: var(--mortar-300) !important; }
+
+.leaflet-control-zoom a {
+  background: var(--mortar-900) !important;
+  color: var(--mortar-300) !important;
+  border-color: var(--mortar-800) !important;
+}
+.leaflet-control-zoom a:hover { background: var(--mortar-800) !important; }
+
+.leaflet-popup-content-wrapper, .leaflet-popup-tip {
+  background: var(--mortar-900) !important;
+  color: var(--mortar-300) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5) !important;
+}
+
+/* Custom crew pin markers */
+.dispatch-pin {
+  width: 28px;
+  height: 28px;
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  border: 2px solid rgba(255,255,255,0.9);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+  display: grid;
+  place-items: center;
+}
+.dispatch-pin span {
+  transform: rotate(45deg);
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+}
+.dispatch-pin.orphan {
+  background: var(--mortar-500) !important;
+  animation: pulse-orphan 2s infinite;
+}
+@keyframes pulse-orphan {
+  0%, 100% { box-shadow: 0 2px 8px rgba(0,0,0,0.5), 0 0 0 0 rgba(176,74,60,0.7); }
+  50%      { box-shadow: 0 2px 8px rgba(0,0,0,0.5), 0 0 0 8px rgba(176,74,60,0); }
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--mortar-950); }
+::-webkit-scrollbar-thumb { background: var(--mortar-800); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--mortar-500); }
+
+/* Drag affordance */
+.task-card {
+  cursor: grab;
+  transition: transform 0.12s, background 0.12s;
+}
+.task-card:active { cursor: grabbing; }
+.task-card.dragging { opacity: 0.4; }
+.crew-dropzone.drop-target {
+  outline: 2px dashed var(--brick);
+  outline-offset: -4px;
+}
