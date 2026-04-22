@@ -22,24 +22,30 @@ export default async (req) => {
   try { body = await req.json() } catch { return json({ error: 'Invalid JSON body' }, 400) }
   const address = (body?.address || '').trim()
   const duration_hrs = Number(body?.duration_hrs) || 2
+  const providedLat = body?.lat != null ? Number(body.lat) : null
+  const providedLng = body?.lng != null ? Number(body.lng) : null
   if (!address || address.length < 5) return json({ error: 'Address too short' }, 400)
 
-  // Geocode via Nominatim (free, no key). Rate-limited but fine for one lookup per user action.
-  let lat = null, lng = null, resolved = address
-  try {
-    const geoResp = await fetch(
-      `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(address)}`,
-      { headers: { 'User-Agent': 'NorthShoreDispatch/1.0 (zac@northshoremasonry.com)' } }
-    )
-    if (geoResp.ok) {
-      const arr = await geoResp.json()
-      if (arr?.[0]) {
-        lat = Number(arr[0].lat)
-        lng = Number(arr[0].lon)
-        resolved = arr[0].display_name || address
+  // If the client already geocoded (via Mapbox), use those coords directly
+  let lat = providedLat, lng = providedLng, resolved = address
+
+  // Otherwise fall back to Nominatim
+  if (lat == null || lng == null) {
+    try {
+      const geoResp = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(address)}`,
+        { headers: { 'User-Agent': 'NorthShoreDispatch/1.0 (zac@northshoremasonry.com)' } }
+      )
+      if (geoResp.ok) {
+        const arr = await geoResp.json()
+        if (arr?.[0]) {
+          lat = Number(arr[0].lat)
+          lng = Number(arr[0].lon)
+          resolved = arr[0].display_name || address
+        }
       }
-    }
-  } catch (_) { /* fall through */ }
+    } catch (_) { /* fall through */ }
+  }
 
   if (lat == null || lng == null) {
     return json({ error: 'Could not geocode address', address, lat: null, lng: null, suggestions: [] }, 200)

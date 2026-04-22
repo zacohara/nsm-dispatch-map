@@ -3,7 +3,7 @@ import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-
 import L from 'leaflet'
 import { formatTime, crewColor } from '../lib/utils'
 
-// Fit bounds to whatever points are currently meaningful
+// Fit to a set of points when the set identity changes
 function FitBounds({ points, trigger }) {
   const map = useMap()
   useEffect(() => {
@@ -15,7 +15,7 @@ function FitBounds({ points, trigger }) {
   return null
 }
 
-// Pan to selected task marker so it's visible
+// Pan to the selected task so the glowing pin is centered
 function PanToSelected({ lat, lng, trigger }) {
   const map = useMap()
   useEffect(() => {
@@ -26,57 +26,87 @@ function PanToSelected({ lat, lng, trigger }) {
   return null
 }
 
-// Initials/teardrop pin — default mode
-function teardropIcon(color, label, isOrphan, dimmed, avatarUrl) {
+// Teardrop pin with initials — DEFAULT MODE (no rep selected)
+function teardropIcon(color, label, isOrphan, dimmed) {
   const classes = ['dispatch-pin']
   if (isOrphan) classes.push('orphan')
   if (dimmed) classes.push('dimmed')
-
-  const inner = avatarUrl
-    ? `<img src="${avatarUrl}" class="pin-avatar" onerror="this.style.display='none'" referrerpolicy="no-referrer"/>`
-    : `<span>${label || ''}</span>`
-
   return L.divIcon({
     className: '',
-    html: `<div class="${classes.join(' ')}" style="background:${color}">${inner}</div>`,
-    iconSize: [32, 32],
-    iconAnchor: [16, 32],
-    popupAnchor: [0, -32],
+    html: `<div class="${classes.join(' ')}" style="background:${color}"><span>${label || ''}</span></div>`,
+    iconSize: [30, 30],
+    iconAnchor: [15, 30],
+    popupAnchor: [0, -28],
   })
 }
 
-// Numbered route pin (rep selected). Uses avatar if available, number badge overlay.
-function numberedIcon(color, n, avatarUrl, isHighlighted) {
-  const size = isHighlighted ? 46 : 38
-  const highlightClass = isHighlighted ? ' highlighted' : ''
-
-  const avatarInner = avatarUrl
-    ? `<img src="${avatarUrl}" class="pin-avatar-full" onerror="this.parentElement.classList.add('avatar-missing')" referrerpolicy="no-referrer"/>`
-    : ''
-
+// Clean numbered disc — ROUTE MODE. No avatar. Number in rep's color, white text.
+function numberedIcon(color, n, isHighlighted) {
+  const size = isHighlighted ? 42 : 34
+  const cls = 'route-pin' + (isHighlighted ? ' highlighted' : '')
   return L.divIcon({
     className: '',
-    html: `
-      <div class="route-pin${highlightClass}" style="background:${color};width:${size}px;height:${size}px">
-        ${avatarInner}
-        <div class="route-pin-num" style="background:${color}">${n}</div>
-      </div>
-    `,
+    html: `<div class="${cls}" style="background:${color};width:${size}px;height:${size}px"><span>${n}</span></div>`,
     iconSize: [size, size],
     iconAnchor: [size / 2, size / 2],
     popupAnchor: [0, -size / 2],
   })
 }
 
-// Fit-search pin
+// Fit-search destination pin
 function fitIcon() {
   return L.divIcon({
     className: '',
     html: `<div class="fit-pin"></div>`,
-    iconSize: [20, 20],
-    iconAnchor: [10, 10],
-    popupAnchor: [0, -10],
+    iconSize: [22, 22],
+    iconAnchor: [11, 11],
+    popupAnchor: [0, -11],
   })
+}
+
+// PopupCard — shared popup content including rep avatar
+function PopupCard({ task, rep, stopNum, stopTotal }) {
+  return (
+    <div className="popup-card">
+      {stopNum != null && (
+        <div className="text-[10px] uppercase tracking-[0.2em] text-ns-400 font-display mb-1">
+          Stop {stopNum} of {stopTotal}
+        </div>
+      )}
+      <div className="font-bold text-mortar-300 text-sm mb-1 leading-tight">
+        {task.job_name || 'Unnamed job'}
+      </div>
+      {task.job_address && (
+        <div className="text-mortar-500 text-[11px] mb-2">{task.job_address}</div>
+      )}
+      <div className="flex items-center gap-2 pt-2 border-t border-mortar-800">
+        {rep?.avatar_url ? (
+          <img
+            src={rep.avatar_url}
+            alt=""
+            className="w-9 h-9 rounded-full object-cover flex-shrink-0"
+            style={{ boxShadow: `0 0 0 2px ${rep.color}, 0 2px 6px rgba(0,0,0,0.4)` }}
+            referrerPolicy="no-referrer"
+          />
+        ) : (
+          <div
+            className="w-9 h-9 rounded-full grid place-items-center flex-shrink-0 text-white font-bold text-xs"
+            style={{ background: rep?.color || '#6d675d' }}
+          >
+            {(rep?.name || '?').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()}
+          </div>
+        )}
+        <div className="flex-1 min-w-0">
+          <div className="text-xs font-semibold text-mortar-300 truncate">
+            {rep?.name || 'Unassigned'}
+          </div>
+          <div className="text-[10px] text-mortar-500">
+            {formatTime(task.start_time) || 'no time'} · {task.duration_hrs || 8}h
+          </div>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export default function MapView({
@@ -94,7 +124,6 @@ export default function MapView({
     [tasks]
   )
 
-  // Selected rep's stops sorted by start_time → becomes the numbered route
   const selectedTasks = useMemo(() => {
     if (!selectedCrewId) return []
     return visible
@@ -117,7 +146,6 @@ export default function MapView({
     return selectedTasks.map(t => [t.lat, t.lng])
   }, [selectedTasks])
 
-  // Bounds target: in route mode → just the route; otherwise → all visible + fit pin
   const boundsPoints = useMemo(() => {
     if (selectedTasks.length) return selectedTasks
     const pts = [...visible]
@@ -125,16 +153,13 @@ export default function MapView({
     return pts
   }, [selectedTasks, visible, fitResult])
 
-  // When a task is selected, find its coordinates so we can pan
   const selectedTaskCoords = useMemo(() => {
     if (!selectedTaskId) return { lat: null, lng: null }
     const t = visible.find(x => x.id === selectedTaskId)
     return t ? { lat: t.lat, lng: t.lng } : { lat: null, lng: null }
   }, [selectedTaskId, visible])
 
-  const defaultCenter = [41.8781, -87.6298] // Chicago
-
-  // Trigger keys change only when the "thing to fit" changes, not on every render
+  const defaultCenter = [41.8781, -87.6298]
   const boundsTrigger = `${selectedCrewId || 'all'}|${visible.length}|${fitResult?.lat || ''}`
   const panTrigger = selectedTaskId || ''
 
@@ -151,7 +176,7 @@ export default function MapView({
         url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
       />
 
-      {/* Route mode: numbered pins + animated line */}
+      {/* ROUTE MODE: numbered discs + flowing-dot line */}
       {selectedCrewId && selectedTasks.length > 0 && (
         <>
           {selectedTasks.map((t, i) => {
@@ -161,41 +186,45 @@ export default function MapView({
               <Marker
                 key={`route-${t.id}`}
                 position={[t.lat, t.lng]}
-                icon={numberedIcon(color, i + 1, selectedCrew?.avatar_url, isHighlighted)}
+                icon={numberedIcon(color, i + 1, isHighlighted)}
                 eventHandlers={{ click: () => onSelectTask?.(t.id) }}
                 zIndexOffset={isHighlighted ? 2000 : 500 + i}
               >
                 <Popup>
-                  <div className="text-xs">
-                    <div className="text-[10px] uppercase tracking-wider text-mortar-500">
-                      Stop {i + 1} of {selectedTasks.length}
-                    </div>
-                    <div className="font-bold text-mortar-300 mb-1">{t.job_name || 'Unnamed job'}</div>
-                    <div className="text-mortar-500">{t.job_address}</div>
-                    <div className="mt-2 flex gap-3 text-[11px]">
-                      <span><strong>{formatTime(t.start_time) || '—'}</strong></span>
-                      <span>{t.duration_hrs || 8}h</span>
-                    </div>
-                  </div>
+                  <PopupCard task={t} rep={selectedCrew} stopNum={i + 1} stopTotal={selectedTasks.length} />
                 </Popup>
               </Marker>
             )
           })}
           {routePositions && routePositions.length >= 2 && (
-            <Polyline
-              positions={routePositions}
-              pathOptions={{
-                color: selectedCrew?.color || '#4a9dcf',
-                weight: 4,
-                opacity: 0.9,
-                className: 'route-line',
-              }}
-            />
+            <>
+              {/* Base path — solid, low opacity */}
+              <Polyline
+                positions={routePositions}
+                pathOptions={{
+                  color: selectedCrew?.color || '#4a9dcf',
+                  weight: 3,
+                  opacity: 0.55,
+                }}
+              />
+              {/* Flowing-dots overlay */}
+              <Polyline
+                positions={routePositions}
+                pathOptions={{
+                  color: selectedCrew?.color || '#4a9dcf',
+                  weight: 3,
+                  opacity: 0.95,
+                  dashArray: '2 14',
+                  lineCap: 'round',
+                  className: 'route-line-flow',
+                }}
+              />
+            </>
           )}
         </>
       )}
 
-      {/* Default mode (no rep selected): teardrop/avatar pins for every task */}
+      {/* DEFAULT MODE: small teardrops, no faces */}
       {!selectedCrewId && visible.map(t => {
         const crewObj = crews.find(c => c.id === t.crew_id)
         const color = crewColor(t.crew_id, crews)
@@ -206,31 +235,18 @@ export default function MapView({
           <Marker
             key={t.id}
             position={[t.lat, t.lng]}
-            icon={teardropIcon(color, initials, isOrphan, false, crewObj?.avatar_url)}
+            icon={teardropIcon(color, initials, isOrphan, false)}
             eventHandlers={{ click: () => onSelectTask?.(t.id) }}
             zIndexOffset={isSelected ? 2000 : 0}
           >
             <Popup>
-              <div className="text-xs">
-                <div className="font-bold text-mortar-300 mb-1">{t.job_name || 'Unnamed job'}</div>
-                <div className="text-mortar-500">{t.job_address}</div>
-                <div className="mt-2 flex gap-3 text-[11px]">
-                  <span><strong>{formatTime(t.start_time) || '—'}</strong></span>
-                  <span>{t.duration_hrs || 8}h</span>
-                </div>
-                <div className="mt-1 text-[11px]">
-                  <span className="inline-flex items-center gap-1">
-                    <span className="w-2 h-2 rounded-full" style={{ background: color }} />
-                    {crewObj?.name || 'Unassigned'}
-                  </span>
-                </div>
-              </div>
+              <PopupCard task={t} rep={crewObj} />
             </Popup>
           </Marker>
         )
       })}
 
-      {/* Route-mode other reps: dimmed teardrops for context */}
+      {/* Route mode: dim other reps' pins for context */}
       {selectedCrewId && visible
         .filter(t => t.crew_id !== selectedCrewId)
         .map(t => {
@@ -242,22 +258,17 @@ export default function MapView({
             <Marker
               key={`dim-${t.id}`}
               position={[t.lat, t.lng]}
-              icon={teardropIcon(color, initials, isOrphan, true, crewObj?.avatar_url)}
+              icon={teardropIcon(color, initials, isOrphan, true)}
               eventHandlers={{ click: () => onSelectTask?.(t.id) }}
               zIndexOffset={0}
             >
               <Popup>
-                <div className="text-xs">
-                  <div className="font-bold text-mortar-300 mb-1">{t.job_name || 'Unnamed job'}</div>
-                  <div className="text-mortar-500">{t.job_address}</div>
-                  <div className="mt-1 text-[11px]">{crewObj?.name || 'Unassigned'}</div>
-                </div>
+                <PopupCard task={t} rep={crewObj} />
               </Popup>
             </Marker>
           )
         })}
 
-      {/* Fit-search destination */}
       {fitResult?.lat != null && (
         <Marker position={[fitResult.lat, fitResult.lng]} icon={fitIcon()} zIndexOffset={2500}>
           <Popup>

@@ -81,3 +81,15 @@ export async function suggestSlots({ address, duration_hrs = 2 }) {
   if (!r.ok) throw new Error(`Suggest failed: ${r.status}`)
   return r.json()
 }
+
+// Same as suggestSlots but pre-geocoded by Mapbox on the client —
+// lets suggest-slots skip its Nominatim lookup step.
+export async function suggestSlotsAt({ address, lat, lng, duration_hrs = 2 }) {
+  const r = await fetch('/api/suggest-slots', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ address, lat, lng, duration_hrs }),
+  })
+  if (!r.ok) throw new Error(`Suggest failed: ${r.status}`)
+  return r.json()
+}

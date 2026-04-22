@@ -34,18 +34,16 @@ html, body, #root {
   letter-spacing: 0.01em;
 }
 
-/* ── Subtle brick texture for the header slab ──────────── */
+/* ── Brick texture for branded surfaces ─────────────────── */
 .brick-texture {
   background-color: var(--mortar-900);
   background-image:
     repeating-linear-gradient(
-      0deg,
-      transparent 0, transparent 18px,
+      0deg, transparent 0, transparent 18px,
       rgba(255,255,255,0.018) 18px, rgba(255,255,255,0.018) 19px
     ),
     repeating-linear-gradient(
-      90deg,
-      transparent 0, transparent 48px,
+      90deg, transparent 0, transparent 48px,
       rgba(255,255,255,0.018) 48px, rgba(255,255,255,0.018) 49px
     );
 }
@@ -70,39 +68,35 @@ html, body, #root {
 .leaflet-popup-content-wrapper, .leaflet-popup-tip {
   background: var(--mortar-900) !important;
   color: var(--mortar-300) !important;
-  border-radius: 8px !important;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.5) !important;
+  border-radius: 10px !important;
+  box-shadow: 0 10px 28px rgba(0,0,0,0.6) !important;
+  border: 1px solid var(--mortar-800);
 }
+.leaflet-popup-content { margin: 10px 12px !important; min-width: 200px; }
+.popup-card { font-size: 11px; }
 
-/* ── Teardrop pins ──────────────────────────────────────── */
+/* ── TEARDROP PINS (default mode) ───────────────────────── */
 .dispatch-pin {
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   border-radius: 50% 50% 50% 0;
   transform: rotate(-45deg);
   border: 2px solid rgba(255,255,255,0.92);
   box-shadow: 0 3px 10px rgba(0,0,0,0.55);
   display: grid;
   place-items: center;
-  transition: transform 0.2s ease, filter 0.2s ease, opacity 0.2s ease;
+  transition: filter 0.2s ease, opacity 0.2s ease;
   overflow: hidden;
 }
 .dispatch-pin span {
   transform: rotate(45deg);
   color: white;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.02em;
 }
-.dispatch-pin .pin-avatar {
-  transform: rotate(45deg);
-  width: 36px;
-  height: 36px;
-  object-fit: cover;
-  border-radius: 50%;
-}
 .dispatch-pin.dimmed {
-  opacity: 0.2;
+  opacity: 0.22;
   filter: saturate(0.3);
 }
 .dispatch-pin.orphan {
@@ -114,66 +108,50 @@ html, body, #root {
   50%      { box-shadow: 0 3px 10px rgba(0,0,0,0.55), 0 0 0 10px rgba(74,157,207,0); }
 }
 
-/* ── Numbered route pin ─────────────────────────────────── */
+/* ── NUMBERED ROUTE PINS (rep selected) ─────────────────── */
 .route-pin {
   border-radius: 50%;
-  border: 3px solid rgba(255,255,255,0.96);
+  border: 2px solid rgba(255,255,255,0.96);
   box-shadow: 0 4px 14px rgba(0,0,0,0.7);
   display: grid;
   place-items: center;
-  position: relative;
-  overflow: visible;
   animation: pin-pop 0.35s cubic-bezier(.34,1.56,.64,1) both;
-  transition: width 0.25s, height 0.25s, box-shadow 0.25s;
+  transition: width 0.25s ease, height 0.25s ease, box-shadow 0.25s ease;
 }
-.route-pin.highlighted {
-  animation: pin-pop 0.35s cubic-bezier(.34,1.56,.64,1) both, pin-glow 1.6s ease-in-out infinite;
-}
-.route-pin .pin-avatar-full {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  border-radius: 50%;
-}
-.route-pin.avatar-missing .pin-avatar-full { display: none; }
-.route-pin-num {
-  position: absolute;
-  bottom: -4px;
-  right: -4px;
-  min-width: 20px;
-  height: 20px;
-  padding: 0 5px;
-  border-radius: 10px;
+.route-pin span {
   color: white;
   font-family: 'Barlow Condensed', sans-serif;
   font-weight: 800;
-  font-size: 13px;
-  line-height: 20px;
-  text-align: center;
-  border: 2px solid var(--cream);
-  box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+  font-size: 15px;
+  line-height: 1;
 }
+.route-pin.highlighted {
+  animation: pin-pop 0.35s cubic-bezier(.34,1.56,.64,1) both,
+             pin-glow 1.6s ease-in-out infinite;
+}
+.route-pin.highlighted span { font-size: 18px; }
 @keyframes pin-pop {
   0%   { transform: scale(0); opacity: 0; }
   60%  { transform: scale(1.15); opacity: 1; }
   100% { transform: scale(1); opacity: 1; }
 }
 @keyframes pin-glow {
-  0%, 100% { box-shadow: 0 4px 14px rgba(0,0,0,0.7), 0 0 0 0 rgba(74,157,207,0.7); }
-  50%      { box-shadow: 0 4px 14px rgba(0,0,0,0.7), 0 0 0 14px rgba(74,157,207,0); }
+  0%, 100% { box-shadow: 0 4px 14px rgba(0,0,0,0.7), 0 0 0 0 rgba(74,157,207,0.75); }
+  50%      { box-shadow: 0 4px 14px rgba(0,0,0,0.7), 0 0 0 16px rgba(74,157,207,0); }
 }
 
-/* Animated dashed route line */
-.route-line {
-  stroke-dasharray: 10 8;
-  animation: dash-march 1.8s linear infinite;
-  filter: drop-shadow(0 0 4px rgba(74,157,207,0.3));
+/* ── FLOWING-DOT ROUTE LINE ─────────────────────────────── */
+/* Base path is a faint solid line (rendered behind); overlay is dashed and animates. */
+.route-line-flow {
+  stroke-dasharray: 2 14;
+  animation: flow-dots 2s linear infinite;
+  filter: drop-shadow(0 0 4px currentColor);
 }
-@keyframes dash-march {
-  to { stroke-dashoffset: -36; }
+@keyframes flow-dots {
+  to { stroke-dashoffset: -32; }
 }
 
-/* Fit-search pin */
+/* ── FIT-SEARCH PIN ─────────────────────────────────────── */
 .fit-pin {
   width: 22px;
   height: 22px;
@@ -186,6 +164,56 @@ html, body, #root {
 @keyframes pulse-fit {
   0%, 100% { box-shadow: 0 2px 10px rgba(0,0,0,0.6), 0 0 0 0 rgba(74,157,207,0.75); }
   50%      { box-shadow: 0 2px 10px rgba(0,0,0,0.6), 0 0 0 16px rgba(74,157,207,0); }
+}
+
+/* ── AUTOCOMPLETE DROPDOWN ──────────────────────────────── */
+.autocomplete-dropdown {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  background: var(--mortar-900);
+  border: 1px solid var(--mortar-800);
+  border-bottom: none;
+  box-shadow: 0 -8px 24px rgba(0,0,0,0.5);
+  max-height: 260px;
+  overflow-y: auto;
+  z-index: 40;
+}
+.autocomplete-item {
+  padding: 10px 14px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(44,42,38,0.5);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transition: background 0.12s;
+}
+.autocomplete-item:hover,
+.autocomplete-item.active {
+  background: var(--mortar-800);
+}
+.autocomplete-item.active {
+  border-left: 2px solid var(--ns-400);
+  padding-left: 12px;
+}
+.autocomplete-item .ac-main {
+  color: var(--mortar-300);
+  font-size: 12px;
+  font-weight: 600;
+}
+.autocomplete-item .ac-secondary {
+  color: var(--mortar-500);
+  font-size: 10px;
+}
+.autocomplete-attribution {
+  padding: 4px 12px;
+  font-size: 9px;
+  color: var(--mortar-500);
+  text-align: right;
+  font-style: italic;
+  background: var(--mortar-950);
+  border-top: 1px solid var(--mortar-800);
 }
 
 /* ── Scrollbar ──────────────────────────────────────────── */
@@ -216,17 +244,7 @@ html, body, #root {
     transparent 100%);
   height: 2px;
 }
-.brand-seam-subtle {
-  background-image: linear-gradient(to right,
-    transparent 0%,
-    rgba(74,157,207,0.2) 40%,
-    rgba(74,157,207,0.35) 50%,
-    rgba(74,157,207,0.2) 60%,
-    transparent 100%);
-  height: 1px;
-}
 
-/* Stamped "Since 1978" ribbon look for header */
 .since-stamp {
   display: inline-flex;
   align-items: center;
