@@ -88,17 +88,20 @@ export default async (req) => {
   for (const rep of reps) {
     for (const day of days) {
       const stops = buckets.get(`${rep.id}|${day}`) || []
+      const dow = new Date(day + 'T12:00:00').getDay() // 0=Sun, 6=Sat
+      const isWeekend = dow === 0 || dow === 6
 
       if (stops.length === 0) {
-        // Empty day — huge available bandwidth. Score high but slightly penalize
-        // since there's no known anchor; detour is just 2× from nothing (we use 0).
+        // Empty day: some capacity penalty so a real tight anchor-fit can outrank it.
+        // Weekend empty days are last resort (NSM doesn't typically work weekends).
+        const penalty_miles = isWeekend ? 25 : 8
         candidates.push({
           rep_id: rep.id,
           day,
           insert_index: 0,
-          insert_label: 'Open day — nothing scheduled',
-          added_miles: 0,
-          added_drive_min: 0,
+          insert_label: isWeekend ? 'Open weekend day' : 'Open day — nothing scheduled',
+          added_miles: penalty_miles,
+          added_drive_min: Math.round((penalty_miles / 35) * 60),
         })
         continue
       }
@@ -129,6 +132,9 @@ export default async (req) => {
           added_miles = Math.max(0, viaNew - direct)
           insert_label = `Between stop ${k} and ${k + 1}`
         }
+
+        // Weekend slight penalty even with a real anchor
+        if (isWeekend) added_miles += 10
 
         const added_drive_min = Math.round((added_miles / 35) * 60)
         candidates.push({
