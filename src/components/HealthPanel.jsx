@@ -35,7 +35,7 @@ export default function HealthPanel({ crews, tasks, syncInfo, syncing, onSync, o
         {health.crossMarket > 0 && (
           <span className="text-orange-400">⚑ {health.crossMarket} far from hub</span>
         )}
-        <span className="text-mortar-500">⌀ {health.avgMiles}mi/crew</span>
+        <span className="text-mortar-500">⌀ {health.avgMiles}mi/rep</span>
       </div>
 
       <div className="flex-1" />

@@ -97,7 +97,7 @@ export default function LeftPanel({
   return (
     <div className="flex flex-col h-full">
       <div className="px-3 py-2 border-b border-mortar-800">
-        <div className="text-[10px] uppercase tracking-wider text-mortar-500">Crews</div>
+        <div className="text-[10px] uppercase tracking-wider text-mortar-500">Sales Reps</div>
         <div className="text-sm font-semibold text-mortar-300">
           {crews.length} active · {tasks.length} task{tasks.length === 1 ? '' : 's'}
         </div>

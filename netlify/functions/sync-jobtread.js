@@ -1,9 +1,12 @@
 // Scheduled every 15 min via netlify.toml. Also callable via POST /api/sync-jobtread.
-// Pulls JT scheduled tasks for the next 14 days, upserts to dispatch_tasks.
+// Pulls JT scheduled tasks for the next 14 days, maps each task to its Sales Rep
+// (via job.customFieldValues filtered on the Sales Rep custom field),
+// and upserts to dispatch_tasks.
 
 import { createClient } from '@supabase/supabase-js'
 
 const JT_URL = 'https://api.jobtread.com/pave'
+const SALES_REP_FIELD_ID = '22Nx8AjZSNmw'
 
 export default async (req) => {
   const JT_API_KEY = process.env.JT_API_KEY
@@ -12,10 +15,7 @@ export default async (req) => {
   const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 
   if (!JT_API_KEY || !JT_ORG_ID || !SUPABASE_URL || !SERVICE_KEY) {
-    return new Response(
-      JSON.stringify({ error: 'Missing env: need JT_API_KEY, JT_ORG_ID, VITE_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY' }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } }
-    )
+    return json({ error: 'Missing env: need JT_API_KEY, JT_ORG_ID, VITE_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY' }, 500)
   }
 
   const sb = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } })
@@ -23,7 +23,6 @@ export default async (req) => {
   // Open sync log row
   const { data: logRow } = await sb.from('dispatch_sync_log').insert({ status: 'running' }).select().single()
   const logId = logRow?.id
-
   const finalize = async (status, rowsTouched, errorMsg) => {
     if (!logId) return
     await sb.from('dispatch_sync_log').update({
@@ -41,22 +40,26 @@ export default async (req) => {
     const end = new Date(today); end.setDate(end.getDate() + 14)
     const endISO = end.toISOString().slice(0, 10)
 
-    // Pull scheduled tasks (isToDo: false = scheduled, not to-do)
-    // Structure follows JT tasks/schedule shape — we filter for tasks with startDate in window.
-    const query = {
-      organizationId: JT_ORG_ID,
-      query: {
+    // Paginate in case there are more than one page of tasks in window
+    const allNodes = []
+    let page = null
+    for (let i = 0; i < 10; i++) { // hard cap 10 pages
+      const query = {
         organization: {
           $: { id: JT_ORG_ID },
           tasks: {
             $: {
-              where: [
-                ['isToDo', '=', false],
-                ['startDate', '>=', startISO],
-                ['startDate', '<=', endISO],
-              ],
-              size: 500,
+              size: 200,
+              ...(page ? { page } : {}),
+              where: {
+                and: [
+                  ['isToDo', false],
+                  ['startDate', '>=', startISO],
+                  ['startDate', '<=', endISO],
+                ],
+              },
             },
+            nextPage: {},
             nodes: {
               id: {},
               name: {},
@@ -69,63 +72,62 @@ export default async (req) => {
               job: {
                 id: {},
                 name: {},
-                location: { name: {}, latitude: {}, longitude: {} },
+                location: { id: {}, address: {}, latitude: {}, longitude: {} },
+                customFieldValues: {
+                  $: { where: [['customField', 'id'], SALES_REP_FIELD_ID], size: 1 },
+                  nodes: { value: {} },
+                },
               },
-              assignedTo: { id: {}, name: {} },
             },
           },
         },
-      },
-    }
+      }
 
-    const resp = await fetch(JT_URL, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${JT_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(query),
-    })
-    if (!resp.ok) {
-      const errText = await resp.text()
-      throw new Error(`JT API ${resp.status}: ${errText.slice(0, 300)}`)
-    }
-    const data = await resp.json()
-    const nodes = data?.organization?.tasks?.nodes || []
-
-    if (!nodes.length) {
-      await finalize('ok', 0, null)
-      return new Response(JSON.stringify({ rows_touched: 0, note: 'no tasks in window' }), {
-        status: 200, headers: { 'Content-Type': 'application/json' },
+      const resp = await fetch(JT_URL, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${JT_API_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(query),
       })
+      if (!resp.ok) {
+        const errText = await resp.text()
+        throw new Error(`JT API ${resp.status}: ${errText.slice(0, 300)}`)
+      }
+      const data = await resp.json()
+      const nodes = data?.organization?.tasks?.nodes || []
+      allNodes.push(...nodes)
+      const next = data?.organization?.tasks?.nextPage
+      if (!next) break
+      page = next
     }
 
-    // Load crews for assignment lookup (match by name)
-    const { data: crews } = await sb.from('dispatch_crews').select('id, name, market, home_lat, home_lng')
-    const crewByName = new Map()
-    ;(crews || []).forEach(c => crewByName.set(c.name.toLowerCase().trim(), c))
+    if (!allNodes.length) {
+      await finalize('ok', 0, null)
+      return json({ rows_touched: 0, note: 'no tasks in window' }, 200)
+    }
+
+    // Load reps for name → id lookup
+    const { data: reps } = await sb.from('dispatch_crews').select('id, name').eq('active', true)
+    const repByName = new Map()
+    ;(reps || []).forEach(r => repByName.set(normalizeName(r.name), r.id))
 
     // Map JT task → dispatch_tasks row
-    const rows = nodes
+    const rows = allNodes
       .filter(t => t.startDate)
       .map(t => {
         const loc = t.job?.location || {}
-        const lat = typeof loc.latitude === 'number' && loc.latitude !== 0 ? loc.latitude : null
-        const lng = typeof loc.longitude === 'number' && loc.longitude !== 0 ? loc.longitude : null
+        const lat = isFiniteNonZero(loc.latitude) ? Number(loc.latitude) : null
+        const lng = isFiniteNonZero(loc.longitude) ? Number(loc.longitude) : null
 
-        // Crew assignment — match by assignee name, otherwise leave null (orphan)
-        let crew_id = null
-        const assigneeName = t.assignedTo?.name?.toLowerCase().trim()
-        if (assigneeName && crewByName.has(assigneeName)) {
-          crew_id = crewByName.get(assigneeName).id
-        } else if (lat && lng) {
-          // Fallback: assign to nearest market hub
-          crew_id = classifyToHub(lat, lng, crews || [])
-        }
+        // Sales rep from job's custom field value
+        const repValue = t.job?.customFieldValues?.nodes?.[0]?.value || null
+        const crew_id = repValue ? (repByName.get(normalizeName(repValue)) || null) : null
 
         return {
           id: `jt-${t.id}`,
           jt_task_id: t.id,
           jt_job_id: t.job?.id || null,
           job_name: t.job?.name || t.name || 'Unnamed',
-          job_address: loc.name || null,
+          job_address: loc.address || null,
           lat, lng,
           scheduled_date: t.startDate,
           start_time: t.startTime || null,
@@ -147,39 +149,22 @@ export default async (req) => {
       touched += (count ?? batch.length)
     }
 
+    const unassigned = rows.filter(r => !r.crew_id).length
     await finalize('ok', touched, null)
-    return new Response(JSON.stringify({ rows_touched: touched, pulled: nodes.length }), {
-      status: 200, headers: { 'Content-Type': 'application/json' },
-    })
+    return json({ rows_touched: touched, pulled: allNodes.length, unassigned }, 200)
   } catch (err) {
     await finalize('error', 0, err.message)
-    return new Response(JSON.stringify({ error: err.message }), {
-      status: 500, headers: { 'Content-Type': 'application/json' },
-    })
+    return json({ error: err.message }, 500)
   }
 }
 
-// Pick the nearest hub by haversine
-function classifyToHub(lat, lng, crews) {
-  const hubs = crews.filter(c => c.id?.startsWith('hub-'))
-  if (!hubs.length) return null
-  let best = null; let bestD = Infinity
-  for (const h of hubs) {
-    if (h.home_lat == null) continue
-    const d = haversineMi(lat, lng, h.home_lat, h.home_lng)
-    if (d < bestD) { bestD = d; best = h.id }
-  }
-  return best
+function normalizeName(s) {
+  if (!s) return ''
+  return String(s).toLowerCase().replace(/[''`]/g, "'").replace(/\s+/g, ' ').trim()
 }
 
-function haversineMi(lat1, lng1, lat2, lng2) {
-  const R = 3959
-  const dLat = (lat2 - lat1) * Math.PI / 180
-  const dLng = (lng2 - lng1) * Math.PI / 180
-  const a = Math.sin(dLat / 2) ** 2 +
-            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-            Math.sin(dLng / 2) ** 2
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+function isFiniteNonZero(n) {
+  return typeof n === 'number' && Number.isFinite(n) && n !== 0
 }
 
 function computeDuration(t) {
@@ -188,4 +173,11 @@ function computeDuration(t) {
   const [eh, em] = t.endTime.split(':').map(Number)
   if (isNaN(sh) || isNaN(eh)) return null
   return Math.max(0.5, (eh * 60 + em - sh * 60 - sm) / 60)
+}
+
+function json(body, status) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  })
 }

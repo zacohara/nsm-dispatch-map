@@ -77,7 +77,7 @@ export default function App() {
       {/* Header */}
       <header className="px-4 py-2.5 border-b border-mortar-800 bg-mortar-900 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded bg-brick-600 grid place-items-center text-white font-bold text-sm">🧱</div>
+          <img src="/ns-mark.png" alt="North Shore" className="w-9 h-9 object-contain" />
           <div>
             <div className="text-[10px] uppercase tracking-wider text-mortar-500 leading-none">North Shore Masonry</div>
             <div className="text-sm font-bold text-mortar-300 leading-tight">Dispatch</div>
