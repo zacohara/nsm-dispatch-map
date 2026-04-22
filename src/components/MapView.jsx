@@ -266,25 +266,30 @@ export default function MapView({
           url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
         />
 
-        {/* Home markers — always rendered (dim the non-selected ones in route mode) */}
-        {repsWithHome.map(rep => {
-          const isActive = !selectedCrewId || rep.id === selectedCrewId
-          return (
-            <Marker
-              key={`home-${rep.id}`}
-              position={[rep.home_lat, rep.home_lng]}
-              icon={homeIcon(rep.color, isActive)}
-              zIndexOffset={isActive ? 400 : 50}
-            >
-              <Popup>
-                <div className="text-xs">
-                  <div className="font-bold text-mortar-300">{rep.name}'s home base</div>
-                  <div className="text-mortar-500 text-[11px] mt-0.5">{rep.home_town || 'Home'}</div>
-                </div>
-              </Popup>
-            </Marker>
-          )
-        })}
+        {/* Home markers
+              - route mode (a rep is selected): ONLY that rep's home
+              - default mode: all reps' homes
+            Prevents the 'two homes' confusion when viewing one rep's route. */}
+        {repsWithHome
+          .filter(rep => !selectedCrewId || rep.id === selectedCrewId)
+          .map(rep => {
+            const isActive = !selectedCrewId || rep.id === selectedCrewId
+            return (
+              <Marker
+                key={`home-${rep.id}`}
+                position={[rep.home_lat, rep.home_lng]}
+                icon={homeIcon(rep.color, isActive)}
+                zIndexOffset={isActive ? 400 : 50}
+              >
+                <Popup>
+                  <div className="text-xs">
+                    <div className="font-bold text-mortar-300">{rep.name}'s home base</div>
+                    <div className="text-mortar-500 text-[11px] mt-0.5">{rep.home_town || 'Home'}</div>
+                  </div>
+                </Popup>
+              </Marker>
+            )
+          })}
 
         {/* ROUTE MODE: numbered discs + flowing-dot line */}
         {selectedCrewId && selectedTasks.length > 0 && (
