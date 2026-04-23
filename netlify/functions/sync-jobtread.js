@@ -1,8 +1,9 @@
 // Scheduled every 15 min via netlify.toml. Also callable via POST /api/sync-jobtread.
 // Pulls JT scheduled tasks for the next 14 days, maps each task to its Sales Rep,
 // and enriches with Job Type, Job Status, Project Champion, Lead Score.
-// Also derives a task_category (Estimate / Production / Punch List / Job Start /
-// Other) from the task name itself since JT has no structured task-type field.
+// Task category + color come from JT's taskType on each node (real JT task
+// types). A regex fallback derives the bucket from task.name if taskType is
+// missing on a given node.
 
 import { createClient } from '@supabase/supabase-js'
 
@@ -17,19 +18,19 @@ const FIELD_IDS = {
   LEAD_SCORE:       '22NzWRqaNkMB',
 }
 
-// Derive a category bucket from the task name. JT has no structured task-type
-// field — task.name is the type (e.g., "Masonry Estimate", "Job Close Out/
-// Punch List", "Job Start"). We regex-classify once here so the client can
-// filter and color-code without re-doing it on every render.
+// Derive a category bucket from the task name — used only as a fallback when
+// JT doesn't return a taskType on the node (older tasks without one set).
+// Output matches JT's real task-type bucket names so downstream filters and
+// the static color map line up.
 function deriveTaskCategory(name) {
-  if (!name) return 'Other'
+  if (!name) return 'Uncategorized'
   const n = String(name).toLowerCase()
-  if (/\bestimate\b/.test(n))                                          return 'Estimate'
-  if (/\bjob start\b|\bstart[- ]?up\b|\bkick ?off\b/.test(n))          return 'Job Start'
-  if (/\bpunch ?list\b|\bclose ?out\b|\bfinal walk\b/.test(n))         return 'Punch List'
-  if (/\btuckpoint|\bmasonry\b|\bwaterproof|\bcaulk|\bseal|\brebuild|\bchimney|\bbrick|\bstone|\bconcrete\b/.test(n)) return 'Production'
-  if (/\bappt\b|\bappointment\b|\bmeeting\b/.test(n))                  return 'Estimate'
-  return 'Other'
+  if (/\burgent\b|\bmust ?do\b/.test(n))                                                  return '1 Urgent Must Do'
+  if (/\bestimate\b|\bbid request\b|\bappt\b|\bappointment\b|\bmeeting\b/.test(n))        return '2 Estimate/Bid Requests'
+  if (/\bclose[- ]?out\b|\bpunch ?list\b|\bfinal walk\b|\bclose the deal\b/.test(n))      return '3 Close The Deal!'
+  if (/\bjob start\b|\bstart[- ]?up\b|\bkick ?off\b|\btuckpoint|\bmasonry\b|\bwaterproof|\bcaulk|\bseal|\brebuild|\bchimney|\bbrick|\bstone|\bconcrete\b/.test(n)) return '4 Production'
+  if (/\bpost[- ]?job\b|\bsatisfaction\b|\bfollow[- ]?up\b|\breview\b/.test(n))           return '5 Post Job Satisfaction'
+  return 'Uncategorized'
 }
 
 export default async (req) => {
@@ -95,6 +96,7 @@ export default async (req) => {
                 endTime: {},
                 completed: {},
                 description: {},
+                taskType: { id: {}, name: {}, color: {} },
                 job: {
                   id: {},
                   name: {},
@@ -170,7 +172,8 @@ export default async (req) => {
         const leadScore       = cfvById.get(FIELD_IDS.LEAD_SCORE)       || null
 
         const crew_id = salesRep ? (repByName.get(normalizeName(salesRep)) || null) : null
-        const task_category = deriveTaskCategory(t.name)
+        const task_category = t.taskType?.name || deriveTaskCategory(t.name)
+        const task_category_color = t.taskType?.color || null
 
         return {
           id: `jt-${t.id}`,
@@ -186,7 +189,8 @@ export default async (req) => {
           status: t.completed ? 'completed' : 'scheduled',
           notes: t.description || null,
           task_description: t.name || null,          // the actual task name, e.g. "Masonry Estimate"
-          task_category,                              // Estimate / Production / Punch List / Job Start / Other
+          task_category,                              // JT taskType.name, e.g. "2 Estimate/Bid Requests"
+          task_category_color,                        // JT taskType.color hex, e.g. "#2de139"
           job_type: jobType,
           job_status: jobStatus,
           project_champion: projectChampion,

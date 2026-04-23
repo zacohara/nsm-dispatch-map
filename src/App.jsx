@@ -29,7 +29,7 @@ export default function App() {
   // Apply the category filter. Empty set → all tasks visible.
   const filteredTasks = useMemo(() => {
     if (activeCategories.size === 0) return tasks
-    return tasks.filter(t => activeCategories.has(t.task_category || 'Other'))
+    return tasks.filter(t => activeCategories.has(t.task_category || 'Uncategorized'))
   }, [tasks, activeCategories])
 
   const toggleCategory = useCallback((cat) => {

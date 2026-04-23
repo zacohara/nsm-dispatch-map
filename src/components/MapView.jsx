@@ -6,17 +6,46 @@ import { crewDayMiles, crewDayDriveMin } from '../lib/recommender'
 
 const JT_JOB_URL = (jobId) => `https://app.jobtread.com/jobs/${jobId}`
 
-// Task category → border color (Option C). Fill stays rep color (who owns it),
-// border tells you what kind of work (estimate vs production vs punch list).
+// Task category → border color. Fill stays rep color (who owns it); border
+// encodes what kind of work. These are JT's real task-type names and hex
+// values, now synced through on each row as task_category_color. This map is
+// a fallback lookup + used by FilterBar for chip colors.
 export const CATEGORY_COLORS = {
-  'Estimate':   '#4a9dcf', // NS blue — the most common scheduled task
-  'Production': '#5ea572', // green — actual work being performed
-  'Punch List': '#f59e0b', // amber — attention/close-out
-  'Job Start':  '#8b6bb5', // purple — kickoff moments
-  'Other':      '#6d675d', // mortar gray — fallback
+  '1 Urgent Must Do':         '#f01414',
+  '2 Estimate/Bid Requests':  '#2de139',
+  '3 Close The Deal!':        '#31900e',
+  '4 Production':             '#76500f',
+  '5 Post Job Satisfaction':  '#01f4f0',
+  'Uncategorized':            '#6d675d',
 }
 
-export const CATEGORY_ORDER = ['Estimate', 'Production', 'Job Start', 'Punch List', 'Other']
+export const CATEGORY_ORDER = [
+  '1 Urgent Must Do',
+  '2 Estimate/Bid Requests',
+  '3 Close The Deal!',
+  '4 Production',
+  '5 Post Job Satisfaction',
+  'Uncategorized',
+]
+
+// Short labels for chips and pills — the full JT names are too wide.
+export const CATEGORY_SHORT = {
+  '1 Urgent Must Do':         'Urgent',
+  '2 Estimate/Bid Requests':  'Estimate',
+  '3 Close The Deal!':        'Close',
+  '4 Production':             'Production',
+  '5 Post Job Satisfaction':  'Post-Job',
+  'Uncategorized':            'Uncat.',
+}
+
+// Resolve a task's category color. Prefer the per-row synced hex (JT truth),
+// fall back to the static map by name, then to mortar gray.
+export function resolveCategoryColor(task) {
+  if (!task) return CATEGORY_COLORS['Uncategorized']
+  return task.task_category_color
+    || CATEGORY_COLORS[task.task_category]
+    || CATEGORY_COLORS['Uncategorized']
+}
 
 // Job status → chip color. Matches JT's lifecycle flow.
 const STATUS_COLORS = {
@@ -65,12 +94,14 @@ function CenterAt({ lat, lng, zoom = 12, trigger }) {
   return null
 }
 
-// Teardrop pin — default mode. Border color encodes task category.
-function teardropIcon(color, label, isOrphan, dimmed, category) {
+// Teardrop pin — default mode. Border color encodes task category; the caller
+// pre-resolves it via resolveCategoryColor(task) so the row's synced JT hex
+// wins over the static map.
+function teardropIcon(color, label, isOrphan, dimmed, borderColor) {
   const classes = ['dispatch-pin']
   if (isOrphan) classes.push('orphan')
   if (dimmed) classes.push('dimmed')
-  const borderColor = CATEGORY_COLORS[category] || CATEGORY_COLORS['Other']
+  if (!borderColor) borderColor = CATEGORY_COLORS['Uncategorized']
   // Inline border color via style — overrides the default border in .dispatch-pin
   return L.divIcon({
     className: '',
@@ -122,8 +153,9 @@ function fitIcon() {
 
 function PopupCard({ task, rep, stopNum, stopTotal }) {
   const jtUrl = task.jt_job_id ? JT_JOB_URL(task.jt_job_id) : null
-  const category = task.task_category || 'Other'
-  const catColor = CATEGORY_COLORS[category] || CATEGORY_COLORS['Other']
+  const category = task.task_category || 'Uncategorized'
+  const catColor = resolveCategoryColor(task)
+  const catLabel = CATEGORY_SHORT[category] || category
   const status = task.job_status
   const statusStyle = status ? STATUS_COLORS[status] : null
   const champion = task.project_champion
@@ -151,7 +183,7 @@ function PopupCard({ task, rep, stopNum, stopTotal }) {
             className="inline-block w-1.5 h-1.5 rounded-full"
             style={{ background: catColor }}
           />
-          {category}
+          {catLabel}
         </span>
         {statusStyle && (
           <span
@@ -646,7 +678,7 @@ export default function MapView({
             <Marker
               key={t.id}
               position={[t.lat, t.lng]}
-              icon={teardropIcon(color, initials, isOrphan, false, t.task_category)}
+              icon={teardropIcon(color, initials, isOrphan, false, resolveCategoryColor(t))}
               eventHandlers={{ click: () => onSelectTask?.(t.id) }}
               zIndexOffset={isSelected ? 2000 : 0}
             >
@@ -669,7 +701,7 @@ export default function MapView({
               <Marker
                 key={`dim-${t.id}`}
                 position={[t.lat, t.lng]}
-                icon={teardropIcon(color, initials, isOrphan, true, t.task_category)}
+                icon={teardropIcon(color, initials, isOrphan, true, resolveCategoryColor(t))}
                 eventHandlers={{ click: () => onSelectTask?.(t.id) }}
                 zIndexOffset={0}
               >
