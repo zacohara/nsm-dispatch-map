@@ -107,7 +107,7 @@ export default async (req) => {
 
     const allNodes = []
     let page = null
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 40; i++) {
       const payload = {
         query: {
           $: { grantKey: JT_API_KEY },
@@ -115,7 +115,11 @@ export default async (req) => {
             $: { id: JT_ORG_ID },
             tasks: {
               $: {
-                size: 100,
+                // Shrunk from 100 to 50 in v0.18e because adding assignedMemberships
+                // + user records to each node pushed the 100-node response past
+                // JT's 413 threshold. Pagination compensates; still well under
+                // Netlify's 26s budget.
+                size: 50,
                 ...(page ? { page } : {}),
                 where: {
                   and: [
@@ -137,11 +141,10 @@ export default async (req) => {
                 description: {},
                 taskType: { id: {}, name: {}, color: {} },
                 // Pull assignees so we can attribute rep-owned tasks even when
-                // the Sales Rep custom field isn't set on them (blockers + some
-                // admin tasks are like this). Size 5 is more than enough — we
-                // only look at the first rep match anyway.
+                // the Sales Rep custom field isn't set (blockers + some admin
+                // tasks). Size 2 is enough — we only look at the first match.
                 assignedMemberships: {
-                  $: { size: 5 },
+                  $: { size: 2 },
                   nodes: {
                     id: {},
                     user: { id: {}, name: {} },
