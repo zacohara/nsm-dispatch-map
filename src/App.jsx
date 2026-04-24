@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useDispatchData, triggerSync, reassignTask } from './lib/data'
-import { todayISO, fmtDate, addDays, DISPATCH_WINDOW_DAYS, MARKETS, taskInMarket, repInMarket } from './lib/utils'
+import { todayISO, fmtDate, addDays, DISPATCH_WINDOW_DAYS, MARKETS, taskRowInMarket, repInMarket } from './lib/utils'
 import { supabase } from './lib/supabase'
 import DayStrip from './components/DayStrip'
 import LeftPanel from './components/LeftPanel'
@@ -58,8 +58,8 @@ export default function App() {
   // the category chips should only count in-market tasks, not across all.
   const marketTasks = useMemo(() => {
     if (market === 'all') return tasks
-    return tasks.filter(t => taskInMarket(market, t.lat, t.lng))
-  }, [tasks, market])
+    return tasks.filter(t => taskRowInMarket(market, t, crews))
+  }, [tasks, crews, market])
 
   // Reps visible under the current market lens. A rep shows up if either
   // their home base is in that market OR at least one of today's tasks is.
@@ -103,6 +103,8 @@ export default function App() {
   // Preload task counts for the 14-day strip — refreshes on sync AND on any task mutation
   // Preload task counts for the strip — refreshes on sync AND on any task mutation.
   // Pulls exactly the window DayStrip renders: [today, today + N − 1] inclusive.
+  // Excludes blockers so the per-day counts match what Cortney sees as pins on
+  // the map — a rep's "WFH" doesn't count as a dispatched task.
   useEffect(() => {
     const start = todayISO()
     const end = addDays(start, DISPATCH_WINDOW_DAYS - 1)
@@ -111,6 +113,7 @@ export default function App() {
       .select('scheduled_date')
       .gte('scheduled_date', start)
       .lte('scheduled_date', end)
+      .eq('is_blocker', false)
       .then(({ data }) => {
         if (!data) return
         const counts = {}
@@ -203,11 +206,21 @@ export default function App() {
           <div className="text-right">
             <div className="text-[9px] uppercase tracking-[0.25em] text-mortar-500 font-display">Today</div>
             <div className="text-sm font-semibold text-mortar-300">
-              {loading
-                ? 'Loading…'
-                : activeCategories.size > 0
-                  ? `${fmtDate(date, 'long')} · ${filteredTasks.length} of ${marketTasks.length} task${marketTasks.length === 1 ? '' : 's'}`
-                  : `${fmtDate(date, 'long')} · ${marketTasks.length} task${marketTasks.length === 1 ? '' : 's'}`}
+              {loading ? 'Loading…' : (() => {
+                // Show real tasks (actual dispatch work). Blockers get mentioned
+                // as a secondary chip so Cortney knows Luke/Jace are off without
+                // it inflating the "task count" that's supposed to correlate 1:1
+                // with pins on the map.
+                const realTasks = marketTasks.filter(t => !t.is_blocker)
+                const realFiltered = filteredTasks.filter(t => !t.is_blocker)
+                const blockerCount = marketTasks.length - realTasks.length
+                const main = activeCategories.size > 0
+                  ? `${fmtDate(date, 'long')} · ${realFiltered.length} of ${realTasks.length} task${realTasks.length === 1 ? '' : 's'}`
+                  : `${fmtDate(date, 'long')} · ${realTasks.length} task${realTasks.length === 1 ? '' : 's'}`
+                return blockerCount > 0
+                  ? <>{main} <span className="text-amber-400/80">· {blockerCount} off</span></>
+                  : main
+              })()}
             </div>
           </div>
         </div>

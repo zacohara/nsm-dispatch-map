@@ -2,9 +2,14 @@ import { distanceMiles, driveMinutes } from './utils'
 
 // Total crew-day miles: home → sorted stops → home (round-trip loop)
 // Only adds a home leg if home_lat/lng is populated.
+//
+// Filters out is_blocker tasks — availability blocks (WFH, PTO, etc.) aren't
+// places the rep drives to, they're time windows. Counting them as stops would
+// falsely inflate drive distance and make "efficient" days look bad.
 export function crewDayMiles(crew, crewTasks) {
-  if (!crewTasks.length) return 0
-  const sorted = [...crewTasks].sort(
+  const realTasks = (crewTasks || []).filter(t => !t.is_blocker)
+  if (!realTasks.length) return 0
+  const sorted = [...realTasks].sort(
     (a, b) => (a.start_time || 'zz').localeCompare(b.start_time || 'zz')
   )
   let total = 0
@@ -53,6 +58,8 @@ export function recommendSwaps(crews, tasks) {
   const suggestions = []
   tasks.forEach(task => {
     if (!task.crew_id || task.lat == null) return
+    // Never suggest moving a rep's own availability blocker to another rep.
+    if (task.is_blocker) return
     const fromCrew = active.find(c => c.id === task.crew_id)
     if (!fromCrew) return
 
@@ -96,15 +103,19 @@ export function recommendSwaps(crews, tasks) {
     .slice(0, 5)
 }
 
-// Health score: orphans + high per-rep mileage
+// Health score: orphans + high per-rep mileage.
+// Blockers (WFH/PTO/etc.) are excluded — they aren't real work, they're time
+// holds. Counting a blocker-without-crew as "orphan" would deflate the score
+// unfairly, and including blockers in mileage is handled inside crewDayMiles.
 export function dayHealth(crews, tasks) {
-  if (!tasks.length) return { score: 100, orphans: 0, avgMiles: 0, totalSaving: 0 }
-  const orphans = tasks.filter(t => !t.crew_id).length
+  const realTasks = (tasks || []).filter(t => !t.is_blocker)
+  if (!realTasks.length) return { score: 100, orphans: 0, avgMiles: 0, totalSaving: 0 }
+  const orphans = realTasks.filter(t => !t.crew_id).length
   const active = crews.filter(c => c.active !== false)
 
   const byCrew = new Map()
   active.forEach(c => byCrew.set(c.id, []))
-  tasks.forEach(t => { if (t.crew_id && byCrew.has(t.crew_id)) byCrew.get(t.crew_id).push(t) })
+  realTasks.forEach(t => { if (t.crew_id && byCrew.has(t.crew_id)) byCrew.get(t.crew_id).push(t) })
 
   const totals = Array.from(byCrew.entries()).map(([id, ts]) => {
     const c = active.find(x => x.id === id)

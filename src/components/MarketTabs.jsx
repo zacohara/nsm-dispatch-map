@@ -8,11 +8,12 @@ import { MARKETS } from '../lib/utils'
 // Each tab shows a count badge of how many of today's tasks are in that
 // market so you can tell at a glance where the workload is.
 export default function MarketTabs({ market, onChange, tasks }) {
-  // Count visible-day tasks that fall within each market's lat/lng bounds.
-  // For `all`, this is just the total visible for symmetry.
+  // Count visible-day real tasks (not blockers — they're rep availability
+  // holds, shouldn't show up in the "X tasks on the Chicago tab" badge).
   const counts = (() => {
     let chicago = 0, milwaukee = 0, other = 0
     for (const t of tasks || []) {
+      if (t.is_blocker) continue
       if (t.lat == null || t.lng == null) continue
       const lat = t.lat, lng = t.lng
       if (lat > 41.30 && lat < 42.55 && lng > -88.60 && lng < -87.25) chicago++

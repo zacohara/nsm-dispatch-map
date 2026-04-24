@@ -318,8 +318,13 @@ export default function MapView({
 }) {
   const mapRef = useRef(null)
 
+  // The map shows real dispatch work only. Blockers (WFH / PTO / sick) are
+  // rep availability holds — they appear as hatched "unavailable" strips in
+  // the sidebar rep card, NOT as pins on the map. They have no meaningful
+  // location (a rep working from home isn't literally at home for routing —
+  // it just means they're unavailable for dispatch).
   const visible = useMemo(
-    () => tasks.filter(t => t.lat != null && t.lng != null),
+    () => tasks.filter(t => t.lat != null && t.lng != null && !t.is_blocker),
     [tasks]
   )
 

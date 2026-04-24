@@ -4,6 +4,13 @@
 // Task category + color come from JT's taskType on each node (real JT task
 // types). A regex fallback derives the bucket from task.name if taskType is
 // missing on a given node.
+//
+// As of v0.18e:
+//   - Also pulls assignedMemberships so we can attribute rep-owned tasks
+//     that don't have the Sales Rep CF set (most blockers, some admin tasks)
+//   - Detects rep availability blockers (WFH, PTO, sick, etc.) and sets
+//     is_blocker = true so the app can render them as unavailability rather
+//     than dispatch work.
 
 import { createClient } from '@supabase/supabase-js'
 
@@ -16,6 +23,34 @@ const FIELD_IDS = {
   JOB_STATUS:       '22NzE5gAPktJ',
   PROJECT_CHAMPION: '22Nx8AjgzaWT',
   LEAD_SCORE:       '22NzWRqaNkMB',
+}
+
+// Rep-availability blocker detection.
+//
+// Reps create calendar blocks in JT to signal unavailability: "WFH", "Jace WFH",
+// "Luke PTO Fri", "Out sick", "Doctor appt 2pm", etc. These are NOT real
+// dispatch work and should not be treated as tasks to route around — they
+// should block the rep's availability during [start, end).
+//
+// How we spot them:
+//   - taskType.name === "1 Urgent Must Do" (reps use this type for their own
+//     blocks since it stands out on their calendar)
+//   - AND the task name matches the BLOCKER_NAME_PATTERN below
+//
+// Both conditions are required because "1 Urgent Must Do" is also used for
+// real urgent estimate / call-customer / drop-off tasks. The name keyword is
+// what disambiguates — deliberately conservative to avoid false positives.
+//
+// Tune this pattern carefully: adding too loose a match (e.g. bare /off/)
+// would catch things like "drop off materials" or "pay off customer" which
+// are real work. Each keyword below should be something a rep would ONLY use
+// to describe their own time, not a customer-facing task.
+const BLOCKER_NAME_PATTERN = /\bwfh\b|\btime[\s-]?off\b|\bpto\b|\bvacation\b|\bholiday\b|\bsick\b|\bout sick\b|\bunavailable\b|\bpersonal\b|\bdoctor\b|\bdr\.? appt\b|\bdentist\b|\bday off\b|\bout of (?:office|town)\b/i
+
+function isBlockerTask(taskTypeName, taskName) {
+  if (taskTypeName !== '1 Urgent Must Do') return false
+  if (!taskName) return false
+  return BLOCKER_NAME_PATTERN.test(taskName)
 }
 
 // Derive a category bucket from the task name — used only as a fallback when
@@ -101,6 +136,17 @@ export default async (req) => {
                 completed: {},
                 description: {},
                 taskType: { id: {}, name: {}, color: {} },
+                // Pull assignees so we can attribute rep-owned tasks even when
+                // the Sales Rep custom field isn't set on them (blockers + some
+                // admin tasks are like this). Size 5 is more than enough — we
+                // only look at the first rep match anyway.
+                assignedMemberships: {
+                  $: { size: 5 },
+                  nodes: {
+                    id: {},
+                    user: { id: {}, name: {} },
+                  },
+                },
                 job: {
                   id: {},
                   name: {},
@@ -149,10 +195,21 @@ export default async (req) => {
       return json({ rows_touched: 0, note: 'no tasks in window' }, 200)
     }
 
-    // Load reps for name → id lookup
-    const { data: reps } = await sb.from('dispatch_crews').select('id, name').eq('active', true)
+    // Load reps for attribution lookups. We maintain two maps:
+    //   - repByJtUserId: the accurate one, keyed on the JT user ID returned
+    //     by assignedMemberships. Populated after backfill via the memberships
+    //     collection. Missing for reps not yet backfilled — falls through to
+    //     name match below.
+    //   - repByName: fallback, used by both (a) Sales Rep custom field values
+    //     (which are stored as names, not IDs, in JT) and (b) assignedMemberships
+    //     when jt_user_id is missing.
+    const { data: reps } = await sb.from('dispatch_crews').select('id, name, jt_user_id').eq('active', true)
     const repByName = new Map()
-    ;(reps || []).forEach(r => repByName.set(normalizeName(r.name), r.id))
+    const repByJtUserId = new Map()
+    ;(reps || []).forEach(r => {
+      repByName.set(normalizeName(r.name), r.id)
+      if (r.jt_user_id) repByJtUserId.set(r.jt_user_id, r.id)
+    })
 
     // Build rows — extract all 5 custom field values by field id
     const rows = allNodes
@@ -175,9 +232,36 @@ export default async (req) => {
         const projectChampion = cfvById.get(FIELD_IDS.PROJECT_CHAMPION) || null
         const leadScore       = cfvById.get(FIELD_IDS.LEAD_SCORE)       || null
 
-        const crew_id = salesRep ? (repByName.get(normalizeName(salesRep)) || null) : null
         const task_category = t.taskType?.name || deriveTaskCategory(t.name)
         const task_category_color = t.taskType?.color || null
+        const is_blocker = isBlockerTask(t.taskType?.name, t.name)
+
+        // Attribution priority:
+        //   1. For blockers: ALWAYS prefer assignedMemberships. The Sales Rep
+        //      CF is almost never set on blockers and would be wrong if it were
+        //      (rep blocks their OWN calendar; job-level "Sales Rep" is different).
+        //   2. For real tasks: Sales Rep CF first (stable, rarely wrong),
+        //      falling back to assignedMemberships if unset.
+        //   3. Either path tries JT user ID first (precise), then name (fuzzy).
+        let crew_id = null
+        const assigneeNodes = t.assignedMemberships?.nodes || []
+
+        const lookupFromAssignees = () => {
+          for (const am of assigneeNodes) {
+            const u = am?.user
+            if (!u) continue
+            if (u.id && repByJtUserId.has(u.id)) return repByJtUserId.get(u.id)
+            if (u.name && repByName.has(normalizeName(u.name))) return repByName.get(normalizeName(u.name))
+          }
+          return null
+        }
+
+        if (is_blocker) {
+          crew_id = lookupFromAssignees()
+        } else {
+          if (salesRep) crew_id = repByName.get(normalizeName(salesRep)) || null
+          if (!crew_id) crew_id = lookupFromAssignees()
+        }
 
         return {
           id: `jt-${t.id}`,
@@ -195,6 +279,7 @@ export default async (req) => {
           task_description: t.name || null,          // the actual task name, e.g. "Masonry Estimate"
           task_category,                              // JT taskType.name, e.g. "2 Estimate/Bid Requests"
           task_category_color,                        // JT taskType.color hex, e.g. "#2de139"
+          is_blocker,                                 // v0.18e: rep availability blocker, not real work
           job_type: jobType,
           job_status: jobStatus,
           project_champion: projectChampion,
@@ -212,7 +297,9 @@ export default async (req) => {
       touched += (count ?? batch.length)
     }
 
-    const unassigned = rows.filter(r => !r.crew_id).length
+    const unassigned = rows.filter(r => !r.crew_id && !r.is_blocker).length
+    const blockers = rows.filter(r => r.is_blocker).length
+    const blockersUnmatched = rows.filter(r => r.is_blocker && !r.crew_id).length
     const categoryBreakdown = rows.reduce((acc, r) => {
       acc[r.task_category] = (acc[r.task_category] || 0) + 1
       return acc
@@ -223,6 +310,8 @@ export default async (req) => {
       rows_touched: touched,
       pulled: allNodes.length,
       unassigned,
+      blockers,
+      blockers_unmatched: blockersUnmatched,
       categories: categoryBreakdown,
     }, 200)
   } catch (err) {

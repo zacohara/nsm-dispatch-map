@@ -64,24 +64,45 @@ export default async (req) => {
   const [{ data: reps }, { data: tasks }] = await Promise.all([
     sb.from('dispatch_crews').select('id, name, color').eq('active', true),
     sb.from('dispatch_tasks')
-      .select('id, crew_id, scheduled_date, start_time, lat, lng, job_name, job_address')
+      .select('id, crew_id, scheduled_date, start_time, lat, lng, job_name, job_address, is_blocker, duration_hrs')
       .gte('scheduled_date', startISO)
-      .lte('scheduled_date', endISO)
-      .not('lat', 'is', null),
+      .lte('scheduled_date', endISO),
   ])
 
   if (!reps?.length) return json({ address: resolved, lat, lng, suggestions: [] }, 200)
 
-  // Group tasks by rep/day, sorted by start_time
-  const buckets = new Map() // key = `${crew_id}|${date}` → tasks[]
+  // Split tasks into stops (real dispatch work that drives the route) vs
+  // blockers (availability holds — WFH, PTO, doctor). Blockers don't get
+  // sorted into the route but they DO make the rep's slot unavailable during
+  // their time window, so we track them separately and use them to reject
+  // insertion candidates that would collide.
+  const stopsByCrewDay = new Map()     // key = `${crew_id}|${date}` → real-stop tasks (with lat/lng)
+  const blockersByCrewDay = new Map()  // key = `${crew_id}|${date}` → availability blockers
+
   for (const t of tasks || []) {
     if (!t.crew_id) continue
     const k = `${t.crew_id}|${t.scheduled_date}`
-    if (!buckets.has(k)) buckets.set(k, [])
-    buckets.get(k).push(t)
+    if (t.is_blocker) {
+      if (!blockersByCrewDay.has(k)) blockersByCrewDay.set(k, [])
+      blockersByCrewDay.get(k).push(t)
+    } else if (t.lat != null && t.lng != null) {
+      if (!stopsByCrewDay.has(k)) stopsByCrewDay.set(k, [])
+      stopsByCrewDay.get(k).push(t)
+    }
   }
-  for (const arr of buckets.values()) {
+  for (const arr of stopsByCrewDay.values()) {
     arr.sort((a, b) => (a.start_time || 'zz').localeCompare(b.start_time || 'zz'))
+  }
+
+  // Convert "HH:MM" + duration_hrs into a [startMin, endMin) range for collision checks.
+  // Returns null if start_time missing (full-day block — treat as blocking the whole day).
+  function blockerRangeMinutes(b) {
+    if (!b.start_time) return { startMin: 0, endMin: 24 * 60 } // full-day
+    const [h, m] = b.start_time.split(':').map(Number)
+    if (isNaN(h)) return { startMin: 0, endMin: 24 * 60 }
+    const startMin = h * 60 + (m || 0)
+    const durMin = Math.max(30, Math.round((b.duration_hrs || 1) * 60))
+    return { startMin, endMin: startMin + durMin }
   }
 
   // Generate candidates: for each rep, for each day in window, consider insertion
@@ -95,21 +116,30 @@ export default async (req) => {
 
   for (const rep of reps) {
     for (const day of days) {
-      const stops = buckets.get(`${rep.id}|${day}`) || []
+      const stops = stopsByCrewDay.get(`${rep.id}|${day}`) || []
+      const blockers = blockersByCrewDay.get(`${rep.id}|${day}`) || []
       const dow = new Date(day + 'T12:00:00').getDay() // 0=Sun, 6=Sat
       const isWeekend = dow === 0 || dow === 6
 
+      // Is the rep's entire day blocked? (WFH all day, PTO, sick day)
+      // If any blocker spans 6+ hours or starts at midnight, treat as full-day out.
+      const blockerRanges = blockers.map(blockerRangeMinutes)
+      const hasFullDayBlock = blockerRanges.some(r => (r.endMin - r.startMin) >= 6 * 60 || r.startMin === 0)
+      if (hasFullDayBlock) continue // rep unavailable all day — no candidates for this day
+
       if (stops.length === 0) {
-        // Empty day: some capacity penalty so a real tight anchor-fit can outrank it.
-        // Weekend empty days are last resort (NSM doesn't typically work weekends).
+        // Empty day — but if a partial blocker exists, it still counts as "some" work
         const penalty_miles = isWeekend ? 25 : 8
         candidates.push({
           rep_id: rep.id,
           day,
           insert_index: 0,
-          insert_label: isWeekend ? 'Open weekend day' : 'Open day — nothing scheduled',
+          insert_label: blockers.length > 0
+            ? 'Mostly open — rep has a partial block'
+            : (isWeekend ? 'Open weekend day' : 'Open day — nothing scheduled'),
           added_miles: penalty_miles,
           added_drive_min: Math.round((penalty_miles / 35) * 60),
+          _blockerRanges: blockerRanges,
         })
         continue
       }
@@ -145,6 +175,50 @@ export default async (req) => {
         if (isWeekend) added_miles += 10
 
         const added_drive_min = Math.round((added_miles / 35) * 60)
+
+        // Collision check: if there are partial blockers on this day, reject
+        // this candidate if our insertion would land inside the blocker window.
+        // We approximate insertion start time by taking the previous stop's
+        // start_time + drive + 1hr, or "before stop 1" → anchor at 8am.
+        // This is approximate — sync provides start_time on stops but we don't
+        // know yet what start_time the user would assign to the NEW slot. For
+        // the MVP the collision check uses the midpoint of the gap between
+        // the surrounding stops; we refine when we ship the "book" button.
+        const collidesWithBlocker = (() => {
+          if (!blockerRanges.length) return false
+          // Estimated slot start — best guess given the gap
+          let slotStartMin
+          if (k === 0) {
+            // Before first stop — anchor at 8am or first stop's time - 2hr
+            const first = stops[0]
+            if (first.start_time) {
+              const [h, m] = first.start_time.split(':').map(Number)
+              slotStartMin = Math.max(8 * 60, (h * 60 + (m || 0)) - 2 * 60)
+            } else {
+              slotStartMin = 8 * 60
+            }
+          } else if (k === N) {
+            const last = stops[N - 1]
+            if (last.start_time) {
+              const [h, m] = last.start_time.split(':').map(Number)
+              slotStartMin = (h * 60 + (m || 0)) + 2 * 60
+            } else {
+              slotStartMin = 14 * 60
+            }
+          } else {
+            const prev = stops[k - 1]
+            if (prev.start_time) {
+              const [h, m] = prev.start_time.split(':').map(Number)
+              slotStartMin = (h * 60 + (m || 0)) + 90
+            } else {
+              slotStartMin = 12 * 60
+            }
+          }
+          const slotEndMin = slotStartMin + Math.max(60, Math.round((duration_hrs || 2) * 60))
+          return blockerRanges.some(r => slotStartMin < r.endMin && slotEndMin > r.startMin)
+        })()
+        if (collidesWithBlocker) continue
+
         candidates.push({
           rep_id: rep.id,
           day,
@@ -171,7 +245,7 @@ export default async (req) => {
     .map(c => {
       // Embed the rep's existing stops for that day so the client can
       // render a preview route (Home → stops → NEW slot → Home) on hover.
-      const dayStops = (buckets.get(`${c.rep_id}|${c.day}`) || []).map(s => ({
+      const dayStops = (stopsByCrewDay.get(`${c.rep_id}|${c.day}`) || []).map(s => ({
         id: s.id,
         job_name: s.job_name,
         job_address: s.job_address,

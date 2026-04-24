@@ -114,6 +114,22 @@ export function taskInMarket(marketKey, lat, lng) {
   return classifyMarket(lat, lng) === MARKETS[marketKey]?.classify
 }
 
+// Market filter for a full task row — handles blockers too. A blocker has no
+// lat/lng (it's a time hold, not a place), so a pure geographic filter would
+// drop all blockers on any non-"all" lens. Instead, we keep a blocker visible
+// if its owning rep is in the lens via repInMarket. That way, on the Chicago
+// tab, Luke's "WFH" still shows under his card even though the blocker row
+// itself has no coordinates.
+export function taskRowInMarket(marketKey, task, crews) {
+  if (marketKey === 'all') return true
+  if (task.is_blocker) {
+    if (!task.crew_id) return false
+    const rep = crews.find(c => c.id === task.crew_id)
+    return rep ? repInMarket(marketKey, rep, []) : false
+  }
+  return taskInMarket(marketKey, task.lat, task.lng)
+}
+
 // A rep shows under a market lens if EITHER their home is in that market OR
 // at least one of the visible-window tasks is. That way Luke (Prospect Heights
 // home) still appears on Milwaukee when he's got a Milwaukee route that day.

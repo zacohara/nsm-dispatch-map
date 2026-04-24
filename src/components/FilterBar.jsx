@@ -2,26 +2,33 @@ import { useMemo } from 'react'
 import { CATEGORY_COLORS, CATEGORY_ORDER, CATEGORY_SHORT, resolveCategoryColor } from './MapView'
 
 export default function FilterBar({ tasks, activeCategories, onToggle, onReset }) {
-  // Count tasks by category for today — drives the badge number on each chip
+  // Count tasks by category for today — drives the badge number on each chip.
+  // Blockers (WFH / PTO / sick) are rep availability holds, not dispatch work,
+  // so they're excluded from the chip counts. Otherwise "1 Urgent Must Do"
+  // would inflate with every Jace-WFH or Luke-PTO and mislead the user.
   const counts = useMemo(() => {
     const c = {}
     tasks.forEach(t => {
+      if (t.is_blocker) return
       const k = t.task_category || 'Uncategorized'
       c[k] = (c[k] || 0) + 1
     })
     return c
   }, [tasks])
 
-  // Pull the chip color from the first task of each bucket so we honor the
-  // synced JT hex on the row; fall back to the static map if nothing in bucket.
+  // Chip color per category — same filter, same rule.
   const colorByCat = useMemo(() => {
     const m = {}
     tasks.forEach(t => {
+      if (t.is_blocker) return
       const k = t.task_category || 'Uncategorized'
       if (!m[k]) m[k] = resolveCategoryColor(t)
     })
     return m
   }, [tasks])
+
+  // Real-task total (for the "All X" chip). Matches the map pin count.
+  const realTotal = useMemo(() => tasks.filter(t => !t.is_blocker).length, [tasks])
 
   // Only show chips for categories that have at least one task today,
   // plus a persistent 'All' chip at the far left
@@ -45,7 +52,7 @@ export default function FilterBar({ tasks, activeCategories, onToggle, onReset }
         ].join(' ')}
       >
         All
-        <span className="ml-1 text-[10px] opacity-70">{tasks.length}</span>
+        <span className="ml-1 text-[10px] opacity-70">{realTotal}</span>
       </button>
       {visibleCats.map(cat => {
         const color = colorByCat[cat] || CATEGORY_COLORS[cat] || CATEGORY_COLORS['Uncategorized']
