@@ -93,6 +93,19 @@ export async function triggerSync() {
   return r.json()
 }
 
+export async function setRepTiers(updates) {
+  const r = await fetch('/api/set-rep-tier', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ updates }),
+  })
+  if (!r.ok) {
+    const errBody = await r.json().catch(() => ({}))
+    throw new Error(errBody.error || `Set tier failed: ${r.status}`)
+  }
+  return r.json()
+}
+
 export async function reassignTask(taskId, newCrewId, reason = 'manual drag') {
   const r = await fetch('/api/reassign-task', {
     method: 'POST',
@@ -114,12 +127,14 @@ export async function suggestSlots({ address, duration_hrs = 2 }) {
 }
 
 // Same as suggestSlots but pre-geocoded by Mapbox on the client —
-// lets suggest-slots skip its Nominatim lookup step.
-export async function suggestSlotsAt({ address, lat, lng, duration_hrs = 2 }) {
+// lets suggest-slots skip its Nominatim lookup step. rep_ids is an optional
+// array of dispatch_crews.id values to restrict the search to; omit or pass
+// null/empty to consider every active rep.
+export async function suggestSlotsAt({ address, lat, lng, duration_hrs = 2, rep_ids = null }) {
   const r = await fetch('/api/suggest-slots', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ address, lat, lng, duration_hrs }),
+    body: JSON.stringify({ address, lat, lng, duration_hrs, rep_ids }),
   })
   if (!r.ok) throw new Error(`Suggest failed: ${r.status}`)
   return r.json()

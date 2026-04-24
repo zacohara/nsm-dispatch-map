@@ -24,6 +24,11 @@ export default async (req) => {
   const duration_hrs = Number(body?.duration_hrs) || 2
   const providedLat = body?.lat != null ? Number(body.lat) : null
   const providedLng = body?.lng != null ? Number(body.lng) : null
+  // Optional: restrict scoring to a specific subset of reps (empty/null = all active reps).
+  // Comes from the FitPanel rep selector chip row. Values are dispatch_crews.id strings.
+  const repFilter = Array.isArray(body?.rep_ids) && body.rep_ids.length > 0
+    ? new Set(body.rep_ids.map(String))
+    : null
   if (!address || address.length < 5) return json({ error: 'Address too short' }, 400)
 
   // If the client already geocoded (via Mapbox), use those coords directly
@@ -61,15 +66,27 @@ export default async (req) => {
   const end = new Date(today); end.setDate(end.getDate() + (FIT_WINDOW_DAYS - 1))
   const endISO = end.toISOString().slice(0, 10)
 
-  const [{ data: reps }, { data: tasks }] = await Promise.all([
-    sb.from('dispatch_crews').select('id, name, color').eq('active', true),
+  const [{ data: repsRaw }, { data: tasks }] = await Promise.all([
+    sb.from('dispatch_crews').select('id, name, color, priority_tier').eq('active', true),
     sb.from('dispatch_tasks')
       .select('id, crew_id, scheduled_date, start_time, lat, lng, job_name, job_address, is_blocker, duration_hrs')
       .gte('scheduled_date', startISO)
       .lte('scheduled_date', endISO),
   ])
 
+  const reps = repFilter
+    ? (repsRaw || []).filter(r => repFilter.has(String(r.id)))
+    : (repsRaw || [])
+
   if (!reps?.length) return json({ address: resolved, lat, lng, suggestions: [] }, 200)
+
+  // Tier bias (virtual mileage adjustment used only for ranking — does not
+  // affect the added_miles value shown to the user). Lower tier number = higher
+  // preference. Tier 1 reps get an 8-mile "head start"; tier 3 reps get an
+  // 8-mile "handicap." A tier-3 rep still wins if their real detour is
+  // significantly shorter than a tier-1 alternative.
+  const TIER_BIAS_MI = { 1: -8, 2: 0, 3: 8 }
+  const tierBias = (rep) => TIER_BIAS_MI[rep?.priority_tier] ?? 0
 
   // Split tasks into stops (real dispatch work that drives the route) vs
   // blockers (availability holds — WFH, PTO, doctor). Blockers don't get
@@ -132,12 +149,14 @@ export default async (req) => {
         const penalty_miles = isWeekend ? 25 : 8
         candidates.push({
           rep_id: rep.id,
+          priority_tier: rep.priority_tier ?? 2,
           day,
           insert_index: 0,
           insert_label: blockers.length > 0
             ? 'Mostly open — rep has a partial block'
             : (isWeekend ? 'Open weekend day' : 'Open day — nothing scheduled'),
           added_miles: penalty_miles,
+          rank_miles: penalty_miles + tierBias(rep),
           added_drive_min: Math.round((penalty_miles / 35) * 60),
           _blockerRanges: blockerRanges,
         })
@@ -221,26 +240,29 @@ export default async (req) => {
 
         candidates.push({
           rep_id: rep.id,
+          priority_tier: rep.priority_tier ?? 2,
           day,
           insert_index: k,
           insert_label,
           added_miles: Math.round(added_miles * 10) / 10,
+          rank_miles: added_miles + tierBias(rep),
           added_drive_min,
         })
       }
     }
   }
 
-  // Rank: lower added_miles wins. Keep best candidate per (rep, day) so we don't
-  // flood the result with 5 positions from the same rep.
+  // Rank: lower rank_miles wins (real detour + tier bias). Keep best candidate
+  // per (rep, day) so we don't flood the result with 5 positions from the same
+  // rep. Display-facing added_miles stays pure.
   const bestPerRepDay = new Map()
   for (const c of candidates) {
     const k = `${c.rep_id}|${c.day}`
     const cur = bestPerRepDay.get(k)
-    if (!cur || c.added_miles < cur.added_miles) bestPerRepDay.set(k, c)
+    if (!cur || c.rank_miles < cur.rank_miles) bestPerRepDay.set(k, c)
   }
   const ranked = Array.from(bestPerRepDay.values())
-    .sort((a, b) => a.added_miles - b.added_miles)
+    .sort((a, b) => a.rank_miles - b.rank_miles)
     .slice(0, 5)
     .map(c => {
       // Embed the rep's existing stops for that day so the client can

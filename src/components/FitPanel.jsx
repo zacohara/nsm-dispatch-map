@@ -112,8 +112,34 @@ export default function FitPanel({
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [resultsOpen, setResultsOpen] = useState(false)
   const [hoveredIdx, setHoveredIdx] = useState(-1)
+  // Rep filter. null = include all active reps (the default on every reload).
+  // A Set of rep ids means "only these". Not persisted — resets on reload.
+  const [includedRepIds, setIncludedRepIds] = useState(null)
   const inputRef = useRef(null)
   const wrapRef = useRef(null)
+
+  const activeCrews = crews.filter(c => c.active !== false)
+  const allSelected = includedRepIds === null
+  const isRepIncluded = (id) => allSelected || includedRepIds.has(id)
+  const toggleRep = (id) => {
+    setIncludedRepIds(prev => {
+      if (prev === null) {
+        // Was "all" — turning one off means "all except this one"
+        const next = new Set(activeCrews.map(c => c.id))
+        next.delete(id)
+        return next
+      }
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      // If they re-selected everyone, collapse back to null ("all")
+      if (next.size === activeCrews.length) return null
+      return next
+    })
+  }
+  const toggleAll = () => {
+    setIncludedRepIds(prev => (prev === null ? new Set() : null))
+  }
 
   // When a result is locked in, the input gets replaced with a pill showing
   // the selected address. The typing path is disabled entirely until clear.
@@ -166,6 +192,10 @@ export default function FitPanel({
 
   const runSearch = useCallback(async (picked) => {
     if (!picked) return
+    if (includedRepIds !== null && includedRepIds.size === 0) {
+      onFlash?.('Select at least one rep to search', 'error')
+      return
+    }
     setSearching(true)
     setDropdownOpen(false)
     try {
@@ -174,6 +204,7 @@ export default function FitPanel({
         lat: picked.lat,
         lng: picked.lng,
         duration_hrs: duration,
+        rep_ids: includedRepIds === null ? null : Array.from(includedRepIds),
       })
       if (!r?.lat) {
         onFlash?.('Could not find that address', 'error')
@@ -190,7 +221,7 @@ export default function FitPanel({
     } finally {
       setSearching(false)
     }
-  }, [duration, onFlash, onResult, onSelectRep])
+  }, [duration, onFlash, onResult, onSelectRep, includedRepIds])
 
   const handleKeyDown = (e) => {
     if (isLocked) return
@@ -270,6 +301,73 @@ export default function FitPanel({
             </div>
           ))}
           <div className="autocomplete-attribution">Powered by Mapbox</div>
+        </div>
+      )}
+
+      {/* Rep selector chip row — hidden when a result is locked to keep the
+          post-search drawer tidy; resets to "all" on every reload. */}
+      {!isLocked && activeCrews.length > 0 && (
+        <div className="px-3 pt-2 pb-1 flex items-center gap-2 overflow-x-auto flex-nowrap whitespace-nowrap">
+          <button
+            type="button"
+            onClick={toggleAll}
+            className={[
+              'flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-semibold uppercase tracking-wider flex-shrink-0 border transition',
+              allSelected
+                ? 'bg-ns-500 border-ns-400 text-white'
+                : 'bg-mortar-900 border-mortar-700 text-mortar-400 hover:border-ns-500',
+            ].join(' ')}
+            title="Include every active rep in the fit search"
+          >
+            <span
+              className={[
+                'w-6 h-3 rounded-full relative transition',
+                allSelected ? 'bg-white/30' : 'bg-mortar-700',
+              ].join(' ')}
+            >
+              <span
+                className={[
+                  'absolute top-0.5 w-2 h-2 rounded-full bg-white transition-all',
+                  allSelected ? 'left-3.5' : 'left-0.5',
+                ].join(' ')}
+              />
+            </span>
+            All reps
+          </button>
+          <div className="w-px h-5 bg-mortar-800 flex-shrink-0" />
+          {activeCrews.map(c => {
+            const on = isRepIncluded(c.id)
+            return (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => toggleRep(c.id)}
+                className={[
+                  'flex items-center gap-1.5 px-2 py-1 rounded-full text-[11px] font-medium flex-shrink-0 border transition',
+                  on
+                    ? 'text-white'
+                    : 'bg-mortar-900 border-mortar-700 text-mortar-500 hover:border-mortar-500',
+                ].join(' ')}
+                style={on ? { background: c.color, borderColor: c.color } : undefined}
+                title={on ? `Click to exclude ${c.name}` : `Click to include ${c.name}`}
+              >
+                {c.avatar_url ? (
+                  <img
+                    src={c.avatar_url}
+                    alt=""
+                    className="w-4 h-4 rounded-full object-cover"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <span
+                    className="w-3 h-3 rounded-full flex-shrink-0"
+                    style={{ background: on ? 'rgba(255,255,255,0.8)' : c.color }}
+                  />
+                )}
+                <span>{c.name.split(' ')[0]}</span>
+              </button>
+            )
+          })}
         </div>
       )}
 
