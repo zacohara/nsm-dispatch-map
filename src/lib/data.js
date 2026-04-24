@@ -32,18 +32,49 @@ export function useDispatchData(date) {
 
   useEffect(() => { load() }, [load])
 
-  // Realtime subscription for tasks on the visible date
+  // Realtime subscription for tasks on the visible date.
+  // We care about three state transitions:
+  //   - old date ≠ visible, new date = visible  → task MOVED IN (or just got inserted on this day)
+  //   - old date = visible, new date ≠ visible  → task MOVED OUT (treat as delete for this viewer)
+  //   - both = visible                           → normal in-place update
+  //   - neither = visible                        → ignore
+  // The v0.18c-and-earlier code only checked payload.new, so a task moving
+  // Friday → Monday while viewing Friday would silently stay on Friday until
+  // a manual reload.
   useEffect(() => {
     const ch = supabase
       .channel(`dispatch-${date}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'dispatch_tasks' }, (payload) => {
-        const row = payload.new || payload.old
-        if (!row || row.scheduled_date !== date) return
+        const oldDate = payload.old?.scheduled_date
+        const newDate = payload.new?.scheduled_date
+        const rowId = payload.new?.id || payload.old?.id
+        if (!rowId) return
+
+        // Neither before nor after touches this viewer's day → skip
+        if (oldDate !== date && newDate !== date) return
+
+        // Pure DELETE
+        if (payload.eventType === 'DELETE') {
+          setTasks(prev => prev.filter(t => t.id !== rowId))
+          return
+        }
+
+        // Moved OUT: was on our day, now isn't → drop it
+        if (oldDate === date && newDate !== date) {
+          setTasks(prev => prev.filter(t => t.id !== rowId))
+          return
+        }
+
+        // Moved IN or in-place update: upsert into the list
+        const row = payload.new
+        if (!row) return
         setTasks(prev => {
-          if (payload.eventType === 'DELETE') return prev.filter(t => t.id !== row.id)
           const idx = prev.findIndex(t => t.id === row.id)
-          if (idx === -1) return [...prev, payload.new].sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''))
-          const copy = [...prev]; copy[idx] = payload.new
+          if (idx === -1) {
+            return [...prev, row].sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''))
+          }
+          const copy = [...prev]
+          copy[idx] = row
           return copy
         })
       })

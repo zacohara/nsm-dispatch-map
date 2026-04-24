@@ -53,10 +53,12 @@ export default async (req) => {
 
   const sb = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } })
 
-  // Window: today → +4 days
+  // Window: [today, today + FIT_WINDOW_DAYS − 1] inclusive.
+  // Match src/lib/utils.js FIT_WINDOW_DAYS.
+  const FIT_WINDOW_DAYS = 5
   const today = new Date()
   const startISO = today.toISOString().slice(0, 10)
-  const end = new Date(today); end.setDate(end.getDate() + 4)
+  const end = new Date(today); end.setDate(end.getDate() + (FIT_WINDOW_DAYS - 1))
   const endISO = end.toISOString().slice(0, 10)
 
   const [{ data: reps }, { data: tasks }] = await Promise.all([
@@ -86,7 +88,7 @@ export default async (req) => {
   // at every gap (before stop 1, between stops, after last).
   const candidates = []
   const days = []
-  for (let i = 0; i <= 4; i++) {
+  for (let i = 0; i < FIT_WINDOW_DAYS; i++) {
     const d = new Date(today); d.setDate(d.getDate() + i)
     days.push(d.toISOString().slice(0, 10))
   }

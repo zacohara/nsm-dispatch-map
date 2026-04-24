@@ -60,7 +60,11 @@ export default async (req) => {
   try {
     const today = new Date()
     const startISO = today.toISOString().slice(0, 10)
-    const end = new Date(today); end.setDate(end.getDate() + 14)
+    // Window must match DayStrip (DISPATCH_WINDOW_DAYS in src/lib/utils.js).
+    // Keeping this in sync by hand for now since Netlify functions don't share
+    // the client bundle. If you change the client constant, change this too.
+    const DISPATCH_WINDOW_DAYS = 14
+    const end = new Date(today); end.setDate(end.getDate() + (DISPATCH_WINDOW_DAYS - 1))
     const endISO = end.toISOString().slice(0, 10)
 
     // Build the `in` clause for all 5 field IDs in object form

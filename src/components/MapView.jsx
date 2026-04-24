@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet'
 import L from 'leaflet'
-import { formatTime, crewColor } from '../lib/utils'
+import { formatTime, crewColor, MARKETS } from '../lib/utils'
 import { crewDayMiles, crewDayDriveMin } from '../lib/recommender'
 
 const JT_JOB_URL = (jobId) => `https://app.jobtread.com/jobs/${jobId}`
@@ -60,13 +60,49 @@ const STATUS_COLORS = {
   'Red Flag':  { bg: 'rgba(239, 68, 68, 0.2)',    fg: '#f87171' },
 }
 
-// Fit to a set of points when trigger changes
-function FitBounds({ points, trigger }) {
+// Fit to a set of points when trigger changes. If `marketBounds` is provided,
+// the map is guaranteed to show at least that rectangle — so e.g. even if
+// there's only one Chicago pin today, the viewport spans Chicagoland instead
+// of zooming to one block. If the user's rendered points extend beyond the
+// market bounds (rare — only happens when they're on 'all' and a Dallas pin
+// is live), we union instead of dropping the outlier.
+function FitBounds({ points, trigger, marketBounds, excludeOutliers }) {
   const map = useMap()
   useEffect(() => {
-    if (!points.length) return
-    const bounds = L.latLngBounds(points.map(p => [p.lat, p.lng]))
-    if (bounds.isValid()) map.fitBounds(bounds, { padding: [60, 60], maxZoom: 13 })
+    let bounds = null
+
+    // Optionally reject pins that are *way* outside the market — e.g. on the
+    // 'all' tab, Dallas pins exist but we don't want them dragging the frame
+    // open. excludeOutliers=true drops any point more than ~200mi from the
+    // market's center before computing bounds.
+    let usable = points
+    if (excludeOutliers && marketBounds) {
+      const cLat = (marketBounds[0][0] + marketBounds[1][0]) / 2
+      const cLng = (marketBounds[0][1] + marketBounds[1][1]) / 2
+      usable = points.filter(p => {
+        if (p.lat == null || p.lng == null) return false
+        // Rough degrees-to-miles: 1° lat ≈ 69mi, 1° lng ≈ 53mi at 40°N.
+        // 3° in any direction ≈ 200mi — good enough cutoff.
+        const dLat = Math.abs(p.lat - cLat)
+        const dLng = Math.abs(p.lng - cLng)
+        return dLat < 3 && dLng < 3
+      })
+    }
+
+    if (usable.length) {
+      bounds = L.latLngBounds(usable.map(p => [p.lat, p.lng]))
+    }
+
+    // Always extend by market bounds (if provided) so the base framing holds
+    // even when there are zero in-market pins (shouldn't happen, but guard).
+    if (marketBounds) {
+      const mb = L.latLngBounds(marketBounds)
+      bounds = bounds ? bounds.extend(mb) : mb
+    }
+
+    if (bounds && bounds.isValid()) {
+      map.fitBounds(bounds, { padding: [60, 60], maxZoom: 13 })
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trigger])
   return null
@@ -278,6 +314,7 @@ export default function MapView({
   onSelectTask,
   fitResult,
   previewSuggestion, // { rep_id, day, insert_index, day_stops } from FitPanel hover
+  market = 'all',    // current market lens — governs the default-mode bounds floor
 }) {
   const mapRef = useRef(null)
 
@@ -401,7 +438,7 @@ export default function MapView({
     isPreviewMode ? `pv-${previewSuggestion?.rep_id}-${previewSuggestion?.day}-${previewSuggestion?.insert_index}` : '',
     isFitMode ? `fit-${fitResult?.lat}` : '',
     isRouteMode ? `rt-${selectedCrewId}` : '',
-    !isPreviewMode && !isFitMode && !isRouteMode ? `def-${visible.length}` : '',
+    !isPreviewMode && !isFitMode && !isRouteMode ? `def-${market}-${visible.length}` : '',
   ].join('|')
   const panTrigger = selectedTaskId || ''
 
@@ -727,7 +764,10 @@ export default function MapView({
           </Marker>
         )}
 
-        {/* Fit mode → center tightly on the lead. Other modes → fit bounds. */}
+        {/* Fit mode → center tightly on the lead. Other modes → fit bounds.
+            Default mode passes the current market's bounds as a floor (so a
+            single Chicago pin won't zoom to one block) plus excludeOutliers
+            so a stray Dallas pin on the "all" tab doesn't stretch the frame. */}
         {isFitMode ? (
           <CenterAt
             lat={fitResult.lat}
@@ -736,7 +776,12 @@ export default function MapView({
             trigger={`fit-${fitResult.lat}-${fitResult.lng}`}
           />
         ) : (
-          <FitBounds points={boundsPoints} trigger={boundsTrigger} />
+          <FitBounds
+            points={boundsPoints}
+            trigger={boundsTrigger}
+            marketBounds={isRouteMode || isPreviewMode ? null : MARKETS[market]?.bounds}
+            excludeOutliers={!isRouteMode && !isPreviewMode}
+          />
         )}
         <PanToSelected lat={selectedTaskCoords.lat} lng={selectedTaskCoords.lng} trigger={panTrigger} />
       </MapContainer>

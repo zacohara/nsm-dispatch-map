@@ -1,8 +1,8 @@
-import { todayISO, addDays, fmtDate, isToday } from '../lib/utils'
+import { todayISO, addDays, fmtDate, isToday, DISPATCH_WINDOW_DAYS } from '../lib/utils'
 
 export default function DayStrip({ date, onChange, taskCountsByDate = {} }) {
   const start = todayISO()
-  const days = Array.from({ length: 14 }, (_, i) => addDays(start, i))
+  const days = Array.from({ length: DISPATCH_WINDOW_DAYS }, (_, i) => addDays(start, i))
 
   return (
     <div className="flex gap-2 overflow-x-auto px-4 py-3 border-b border-mortar-800 bg-mortar-900/60 backdrop-blur">
