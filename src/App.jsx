@@ -11,6 +11,8 @@ import SuggestPanel from './components/SuggestPanel'
 import FilterBar from './components/FilterBar'
 import MarketTabs from './components/MarketTabs'
 import IntroSplash from './components/IntroSplash'
+import TierAdminModal from './components/TierAdminModal'
+import GanttStrip from './components/GanttStrip'
 
 // localStorage key for remembering the user's last-picked market lens.
 const MARKET_KEY = 'nsm-dispatch-market'
@@ -25,6 +27,9 @@ export default function App() {
   const [fitResult, setFitResult] = useState(null)
   const [previewSuggestion, setPreviewSuggestion] = useState(null)
   const [stripTick, setStripTick] = useState(0)
+  const [tierAdminOpen, setTierAdminOpen] = useState(false)
+  // Mobile sidebar drawer — no effect on desktop (md:+ always shows sidebar).
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   // Filter state — empty set means "show all". Adding a category to the set
   // makes that the active filter (additive — can pick multiple).
   const [activeCategories, setActiveCategories] = useState(() => new Set())
@@ -191,6 +196,16 @@ export default function App() {
       {/* Header */}
       <header className="px-5 py-3 brick-texture flex items-center justify-between border-b border-mortar-800 relative">
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setSidebarOpen(true)}
+            className="md:hidden w-9 h-9 grid place-items-center rounded border border-mortar-800 text-ns-400 hover:border-ns-600"
+            title="Open rep list"
+          >
+            <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M3 6h18M3 12h18M3 18h18" />
+            </svg>
+          </button>
           <img src="/ns-mark.png" alt="" className="w-11 h-11 object-contain drop-shadow-lg" />
           <div className="flex flex-col leading-none">
             <div className="font-display text-cream text-[24px] tracking-tight">
@@ -203,6 +218,17 @@ export default function App() {
         </div>
         <div className="flex items-center gap-5">
           <MarketTabs market={market} onChange={handleMarketChange} tasks={tasks} />
+          <button
+            type="button"
+            onClick={() => setTierAdminOpen(true)}
+            title="Rep priority tiers"
+            className="w-8 h-8 grid place-items-center rounded border border-mortar-800 text-mortar-500 hover:text-ns-400 hover:border-ns-600 transition"
+          >
+            <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+          </button>
           <div className="text-right">
             <div className="text-[9px] uppercase tracking-[0.25em] text-mortar-500 font-display">Today</div>
             <div className="text-sm font-semibold text-mortar-300">
@@ -239,15 +265,37 @@ export default function App() {
       />
 
       {/* Main grid */}
-      <div className="flex-1 flex overflow-hidden">
-        <aside className="w-[320px] flex-shrink-0 border-r border-mortar-800 bg-mortar-950">
+      <div className="flex-1 flex overflow-hidden relative">
+        {/* Mobile backdrop */}
+        {sidebarOpen && (
+          <div
+            className="md:hidden fixed inset-0 bg-black/60 z-[900]"
+            onClick={() => setSidebarOpen(false)}
+          />
+        )}
+
+        <aside
+          className={[
+            'border-r border-mortar-800 bg-mortar-950 flex-shrink-0',
+            // Desktop: static 320px column (unchanged)
+            'md:w-[320px] md:static md:translate-x-0 md:shadow-none',
+            // Mobile: slide-out drawer
+            'fixed inset-y-0 left-0 w-[280px] z-[1000] transition-transform shadow-2xl',
+            sidebarOpen ? 'translate-x-0' : '-translate-x-full',
+          ].join(' ')}
+        >
+          <button
+            type="button"
+            onClick={() => setSidebarOpen(false)}
+            className="md:hidden absolute top-2 right-2 text-mortar-500 hover:text-mortar-300 text-xl w-7 h-7 grid place-items-center rounded hover:bg-mortar-800 z-10"
+          >✕</button>
           <LeftPanel
             crews={marketCrews}
             tasks={filteredTasks}
             selectedCrewId={selectedCrewId}
-            onSelectCrew={setSelectedCrewId}
+            onSelectCrew={(id) => { setSelectedCrewId(id); setSidebarOpen(false) }}
             selectedTaskId={selectedTaskId}
-            onSelectTask={setSelectedTaskId}
+            onSelectTask={(id) => { setSelectedTaskId(id); setSidebarOpen(false) }}
             fitResult={fitResult}
             onExitFitMode={() => { setFitResult(null); setPreviewSuggestion(null) }}
           />
@@ -288,6 +336,17 @@ export default function App() {
         </main>
       </div>
 
+      <GanttStrip
+        crews={marketCrews}
+        tasks={filteredTasks}
+        date={date}
+        selectedCrewId={selectedCrewId}
+        onSelectCrew={setSelectedCrewId}
+        onSelectTask={setSelectedTaskId}
+        fitResult={fitResult}
+        previewSuggestion={previewSuggestion}
+      />
+
       <FitPanel
         crews={crews}
         onResult={setFitResult}
@@ -311,6 +370,15 @@ export default function App() {
         onApplySwap={handleReassign}
         onFlash={flash}
       />
+
+      {tierAdminOpen && (
+        <TierAdminModal
+          crews={crews}
+          onClose={() => setTierAdminOpen(false)}
+          onFlash={flash}
+          onSaved={reload}
+        />
+      )}
 
       {toast && (
         <div className={[
