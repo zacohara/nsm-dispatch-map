@@ -7,7 +7,6 @@ import LeftPanel from './components/LeftPanel'
 import MapView from './components/MapView'
 import HealthPanel from './components/HealthPanel'
 import FitPanel from './components/FitPanel'
-import SuggestPanel from './components/SuggestPanel'
 import FilterBar from './components/FilterBar'
 import MarketTabs from './components/MarketTabs'
 import IntroSplash from './components/IntroSplash'
@@ -194,42 +193,44 @@ export default function App() {
     <div className="h-screen flex flex-col bg-mortar-950">
       <IntroSplash />
       {/* Header */}
-      <header className="px-5 py-3 brick-texture flex items-center justify-between border-b border-mortar-800 relative">
-        <div className="flex items-center gap-3">
+      <header className="px-3 sm:px-5 py-2 sm:py-3 brick-texture flex items-center justify-between border-b border-mortar-800 relative gap-2">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
           <button
             type="button"
             onClick={() => setSidebarOpen(true)}
-            className="md:hidden w-9 h-9 grid place-items-center rounded border border-mortar-800 text-ns-400 hover:border-ns-600"
+            className="md:hidden w-9 h-9 grid place-items-center rounded border border-mortar-800 text-ns-400 hover:border-ns-600 flex-shrink-0"
             title="Open rep list"
           >
             <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M3 6h18M3 12h18M3 18h18" />
             </svg>
           </button>
-          <img src="/ns-mark.png" alt="" className="w-11 h-11 object-contain drop-shadow-lg" />
-          <div className="flex flex-col leading-none">
-            <div className="font-display text-cream text-[24px] tracking-tight">
-              North Shore <span className="text-ns-400">Dispatch</span>
+          <img src="/ns-mark.png" alt="" className="w-9 h-9 sm:w-11 sm:h-11 object-contain drop-shadow-lg flex-shrink-0" />
+          <div className="flex flex-col leading-none min-w-0">
+            <div className="font-display text-cream text-[18px] sm:text-[24px] tracking-tight whitespace-nowrap">
+              <span className="hidden sm:inline">North Shore </span>
+              <span className="sm:hidden">NS </span>
+              <span className="text-ns-400">Dispatch</span>
             </div>
-            <div className="mt-1 since-stamp">
+            <div className="mt-1 since-stamp hidden sm:flex">
               <span className="bar" /> Since 1978 <span className="bar" />
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-5">
+        <div className="flex items-center gap-2 sm:gap-5 flex-shrink-0">
           <MarketTabs market={market} onChange={handleMarketChange} tasks={tasks} />
           <button
             type="button"
             onClick={() => setTierAdminOpen(true)}
             title="Rep priority tiers"
-            className="w-8 h-8 grid place-items-center rounded border border-mortar-800 text-mortar-500 hover:text-ns-400 hover:border-ns-600 transition"
+            className="w-8 h-8 grid place-items-center rounded border border-mortar-800 text-mortar-500 hover:text-ns-400 hover:border-ns-600 transition flex-shrink-0"
           >
             <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2">
               <circle cx="12" cy="12" r="3" />
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
             </svg>
           </button>
-          <div className="text-right">
+          <div className="text-right hidden md:block">
             <div className="text-[9px] uppercase tracking-[0.25em] text-mortar-500 font-display">Today</div>
             <div className="text-sm font-semibold text-mortar-300">
               {loading ? 'Loading…' : (() => {
@@ -298,6 +299,8 @@ export default function App() {
             onSelectTask={(id) => { setSelectedTaskId(id); setSidebarOpen(false) }}
             fitResult={fitResult}
             onExitFitMode={() => { setFitResult(null); setPreviewSuggestion(null) }}
+            onApplySwap={handleReassign}
+            onFlash={flash}
           />
         </aside>
         <main className="flex-1 relative">
@@ -362,13 +365,6 @@ export default function App() {
         syncInfo={syncInfo}
         syncing={syncing}
         onSync={handleSync}
-      />
-
-      <SuggestPanel
-        crews={marketCrews}
-        tasks={marketTasks}
-        onApplySwap={handleReassign}
-        onFlash={flash}
       />
 
       {tierAdminOpen && (

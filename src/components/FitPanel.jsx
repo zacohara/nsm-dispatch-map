@@ -112,6 +112,10 @@ export default function FitPanel({
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [resultsOpen, setResultsOpen] = useState(false)
   const [hoveredIdx, setHoveredIdx] = useState(-1)
+  // Centered search modal — replaces the old inline rep-chip strip + input bar.
+  // Always closed on first paint; opens when the user clicks "Search address"
+  // and closes on ESC, backdrop click, successful search, or the X button.
+  const [searchModalOpen, setSearchModalOpen] = useState(false)
   // Rep filter. null = include all active reps (the default on every reload).
   // A Set of rep ids means "only these". Not persisted — resets on reload.
   const [includedRepIds, setIncludedRepIds] = useState(null)
@@ -190,6 +194,21 @@ export default function FitPanel({
     }
   }, [resultsOpen, onPreviewSuggestion])
 
+  // Search modal: ESC closes; body scroll is locked while open so the
+  // background dispatch map doesn't scroll under the user. Auto-focus on
+  // the address input is handled inline via autoFocus.
+  useEffect(() => {
+    if (!searchModalOpen) return
+    const onKey = (e) => { if (e.key === 'Escape') setSearchModalOpen(false) }
+    document.addEventListener('keydown', onKey)
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.body.style.overflow = prevOverflow
+    }
+  }, [searchModalOpen])
+
   const runSearch = useCallback(async (picked) => {
     if (!picked) return
     if (includedRepIds !== null && includedRepIds.size === 0) {
@@ -217,6 +236,7 @@ export default function FitPanel({
       }
       onResult?.(r)          // → parent sets currentResult → isLocked becomes true
       setResultsOpen(true)
+      setSearchModalOpen(false)
       // Don't write the address back to query — we'll render a pill instead
       setQuery('')
       setSuggestions([])
@@ -303,119 +323,31 @@ export default function FitPanel({
   const lockedAddressShort = currentResult?.address?.split(',').slice(0, 2).join(',')
 
   return (
-    <div className="border-t border-mortar-800 bg-mortar-900/80 relative" ref={wrapRef}>
-      {/* Autocomplete dropdown — ONLY when not locked */}
-      {!isLocked && dropdownOpen && suggestions.length > 0 && (
-        <div className="autocomplete-dropdown">
-          {suggestions.map((s, i) => (
-            <div
-              key={s.id}
-              className={`autocomplete-item ${i === activeIdx ? 'active' : ''}`}
-              onMouseEnter={() => setActiveIdx(i)}
-              onClick={() => runSearch(s)}
-            >
-              <svg className="w-3.5 h-3.5 text-ns-400 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
-                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/>
-              </svg>
-              <div className="flex-1 min-w-0">
-                <div className="ac-main truncate">{s.shortAddress || s.address.split(',')[0]}</div>
-                <div className="ac-secondary truncate">{s.context || s.address}</div>
-              </div>
-            </div>
-          ))}
-          <div className="autocomplete-attribution">Powered by Mapbox</div>
-        </div>
-      )}
-
-      {/* Rep selector chip row — hidden when a result is locked to keep the
-          post-search drawer tidy; resets to "all" on every reload. */}
-      {!isLocked && activeCrews.length > 0 && (
-        <div className="px-3 pt-2 pb-1 flex items-center gap-2 overflow-x-auto flex-nowrap whitespace-nowrap">
-          <button
-            type="button"
-            onClick={toggleAll}
-            className={[
-              'flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-semibold uppercase tracking-wider flex-shrink-0 border transition',
-              allSelected
-                ? 'bg-ns-500 border-ns-400 text-white'
-                : 'bg-mortar-900 border-mortar-700 text-mortar-400 hover:border-ns-500',
-            ].join(' ')}
-            title={allSelected ? 'Searching across every active rep' : 'Lock search to selected reps — see each rep\'s best openings across the 5-day window'}
-          >
-            <span
-              className={[
-                'w-6 h-3 rounded-full relative transition',
-                allSelected ? 'bg-white/30' : 'bg-mortar-700',
-              ].join(' ')}
-            >
-              <span
-                className={[
-                  'absolute top-0.5 w-2 h-2 rounded-full bg-white transition-all',
-                  allSelected ? 'left-3.5' : 'left-0.5',
-                ].join(' ')}
-              />
-            </span>
-            {allSelected ? 'All reps' : `Locked${includedRepIds && includedRepIds.size > 0 ? ` (${includedRepIds.size})` : ''}`}
-          </button>
-          <div className="w-px h-5 bg-mortar-800 flex-shrink-0" />
-          {activeCrews.map(c => {
-            const on = isRepIncluded(c.id)
-            return (
-              <button
-                key={c.id}
-                type="button"
-                onClick={() => toggleRep(c.id)}
-                className={[
-                  'flex items-center gap-1.5 px-2 py-1 rounded-full text-[11px] font-medium flex-shrink-0 border transition',
-                  on
-                    ? 'text-white'
-                    : 'bg-mortar-900 border-mortar-700 text-mortar-500 hover:border-mortar-500',
-                ].join(' ')}
-                style={on ? { background: c.color, borderColor: c.color } : undefined}
-                title={on ? `Click to exclude ${c.name}` : `Click to include ${c.name}`}
-              >
-                {c.avatar_url ? (
-                  <img
-                    src={c.avatar_url}
-                    alt=""
-                    className="w-4 h-4 rounded-full object-cover"
-                    referrerPolicy="no-referrer"
-                  />
-                ) : (
-                  <span
-                    className="w-3 h-3 rounded-full flex-shrink-0"
-                    style={{ background: on ? 'rgba(255,255,255,0.8)' : c.color }}
-                  />
-                )}
-                <span>{c.name.split(' ')[0]}</span>
-              </button>
-            )
-          })}
-        </div>
-      )}
-
-      {/* Input bar — swaps to a locked-address pill when a result is active */}
-      <div className="px-3 py-2.5 flex items-center gap-2">
+    <div className="border-t border-mortar-800 bg-mortar-900/95 relative" ref={wrapRef}>
+      {/* ── Bottom trigger bar ────────────────────────────────────
+          Replaces the old always-visible rep-chip strip + input. When no
+          search is active, shows a single centered "Search address" button.
+          When a result is locked, shows the locked-address pill + new
+          address / show slots actions. The actual search UI lives in a
+          centered modal that opens on demand. */}
+      <div className="px-3 py-2 flex items-center justify-center gap-2 min-h-[44px]">
         {isLocked ? (
-          <div className="flex items-center gap-2 flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-1 min-w-0 max-w-3xl">
             <div className="flex items-center gap-2 flex-1 min-w-0 bg-ns-900/40 border border-ns-700 rounded px-3 py-1.5">
               <svg className="w-4 h-4 text-ns-400 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
                 <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/>
               </svg>
               <span className="text-[10px] uppercase tracking-[0.2em] text-ns-400 font-display flex-shrink-0">Fit lead</span>
               <span className="text-xs text-cream font-semibold truncate">{lockedAddressShort}</span>
-            </div>
-            <div className="flex items-center gap-1 text-[10px] text-mortar-500 flex-shrink-0">
-              <span className="uppercase tracking-wider">hrs</span>
-              <div className="bg-mortar-950 border border-mortar-800 rounded px-2 py-1 text-xs text-mortar-300">
-                {duration}
-              </div>
+              <span className="text-[10px] text-mortar-500 flex-shrink-0 hidden sm:inline">
+                · {duration}hr · {currentResult?.lock_per_rep ? `${groupedByRep?.length || 0} reps locked` : 'all reps'}
+              </span>
             </div>
             {!resultsOpen && fitSuggestions.length > 0 && (
               <button
                 type="button"
                 onClick={() => setResultsOpen(true)}
-                className="px-2.5 py-1.5 text-[11px] rounded bg-ns-500 hover:bg-ns-400 text-white font-semibold flex-shrink-0"
+                className="px-3 py-1.5 text-[11px] rounded bg-ns-500 hover:bg-ns-400 text-white font-semibold flex-shrink-0"
               >
                 Show {fitSuggestions.length} slot{fitSuggestions.length === 1 ? '' : 's'}
               </button>
@@ -426,43 +358,221 @@ export default function FitPanel({
               className="px-2.5 py-1.5 text-xs rounded border border-mortar-700 text-mortar-500 hover:text-mortar-300 hover:border-mortar-500 flex items-center gap-1 flex-shrink-0"
               title="Clear and search new address"
             >
-              <span>New address</span>
+              <span className="hidden sm:inline">New address</span>
               <span>✕</span>
             </button>
           </div>
         ) : (
-          <>
-            <div className="flex items-center gap-2 flex-1 min-w-0 relative">
-              <svg className="w-4 h-4 text-ns-400 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
-                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/>
-              </svg>
-              <input
-                ref={inputRef}
-                type="text"
-                value={query}
-                onChange={e => setQuery(e.target.value)}
-                onKeyDown={handleKeyDown}
-                onFocus={() => { if (suggestions.length) setDropdownOpen(true) }}
-                placeholder="Fit a lead — start typing an address to find the best rep for it"
-                className="flex-1 min-w-0 bg-mortar-950 border border-mortar-800 rounded px-3 py-1.5 text-xs text-mortar-300 placeholder:text-mortar-500 focus:outline-none focus:border-ns-400"
-                autoComplete="off"
-                spellCheck={false}
-              />
-              <div className="flex items-center gap-1 text-[10px] text-mortar-500">
-                <span className="uppercase tracking-wider">hrs</span>
-                <select
-                  value={duration}
-                  onChange={e => setDuration(Number(e.target.value))}
-                  className="bg-mortar-950 border border-mortar-800 rounded px-1.5 py-1 text-xs text-mortar-300 focus:outline-none focus:border-ns-400"
-                >
-                  {[1, 2, 3, 4, 6, 8].map(h => <option key={h} value={h}>{h}</option>)}
-                </select>
-              </div>
-            </div>
-            {searching && <span className="text-[10px] text-mortar-500">Finding…</span>}
-          </>
+          <button
+            type="button"
+            onClick={() => setSearchModalOpen(true)}
+            className="flex items-center gap-2.5 px-5 py-2 rounded-lg bg-ns-500 hover:bg-ns-400 text-white font-semibold text-sm shadow-lg transition border border-ns-300"
+            title="Find the best rep for a lead address"
+          >
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4">
+              <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/>
+            </svg>
+            <span>Search address</span>
+            <span className="text-[10px] uppercase tracking-wider opacity-75 font-normal hidden sm:inline">— find best rep</span>
+          </button>
         )}
       </div>
+
+      {/* ── Search modal ─────────────────────────────────────────
+          Centered overlay with everything needed to fit a lead: address
+          autocomplete, duration, "All reps" toggle, multi-select rep grid.
+          Opens via the button above; closes on backdrop click, ESC, X, or
+          successful search. Uses the same handlers as the old inline UI
+          (runSearch, suggestions, includedRepIds) — only the chrome moved. */}
+      {searchModalOpen && !isLocked && (
+        <div
+          className="fixed inset-0 z-[3200] bg-black/70 backdrop-blur-sm grid place-items-center p-4"
+          onClick={() => setSearchModalOpen(false)}
+          onKeyDown={(e) => e.key === 'Escape' && setSearchModalOpen(false)}
+          tabIndex={-1}
+        >
+          <div
+            className="w-full max-w-xl bg-mortar-900 rounded-xl border border-mortar-800 shadow-2xl overflow-hidden flex flex-col"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="px-5 py-3 brick-texture border-b border-mortar-800 flex items-center justify-between">
+              <div>
+                <div className="text-[10px] uppercase tracking-[0.2em] text-ns-400 font-display">
+                  Fit a lead
+                </div>
+                <div className="font-display text-xl text-cream leading-none mt-1">
+                  Search address
+                </div>
+              </div>
+              <button
+                onClick={() => setSearchModalOpen(false)}
+                className="text-mortar-500 hover:text-mortar-300 text-xl leading-none w-7 h-7 grid place-items-center rounded hover:bg-mortar-800"
+                title="Close (ESC)"
+              >✕</button>
+            </div>
+
+            {/* Address input + duration */}
+            <div className="px-5 py-4 border-b border-mortar-800 relative">
+              <label className="block text-[10px] uppercase tracking-wider text-mortar-500 mb-1.5">
+                Lead address
+              </label>
+              <div className="flex items-center gap-2">
+                <div className="flex-1 min-w-0 relative">
+                  <div className="flex items-center gap-2 bg-mortar-950 border border-mortar-700 rounded px-3 py-2 focus-within:border-ns-400">
+                    <svg className="w-4 h-4 text-ns-400 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                      <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/>
+                    </svg>
+                    <input
+                      ref={inputRef}
+                      type="text"
+                      value={query}
+                      onChange={e => setQuery(e.target.value)}
+                      onKeyDown={handleKeyDown}
+                      onFocus={() => { if (suggestions.length) setDropdownOpen(true) }}
+                      placeholder="Start typing an address…"
+                      className="flex-1 min-w-0 bg-transparent text-sm text-cream placeholder:text-mortar-500 focus:outline-none"
+                      autoComplete="off"
+                      spellCheck={false}
+                      autoFocus
+                    />
+                    {searching && <span className="text-[10px] text-mortar-500 flex-shrink-0">Finding…</span>}
+                  </div>
+                  {/* Autocomplete dropdown — anchored under the input INSIDE the modal */}
+                  {dropdownOpen && suggestions.length > 0 && (
+                    <div className="absolute top-full left-0 right-0 mt-1 bg-mortar-900 border border-mortar-700 rounded shadow-xl z-10 max-h-64 overflow-y-auto">
+                      {suggestions.map((s, i) => (
+                        <div
+                          key={s.id}
+                          className={`autocomplete-item ${i === activeIdx ? 'active' : ''}`}
+                          onMouseEnter={() => setActiveIdx(i)}
+                          onClick={() => runSearch(s)}
+                        >
+                          <svg className="w-3.5 h-3.5 text-ns-400 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/>
+                          </svg>
+                          <div className="flex-1 min-w-0">
+                            <div className="ac-main truncate">{s.shortAddress || s.address.split(',')[0]}</div>
+                            <div className="ac-secondary truncate">{s.context || s.address}</div>
+                          </div>
+                        </div>
+                      ))}
+                      <div className="autocomplete-attribution">Powered by Mapbox</div>
+                    </div>
+                  )}
+                </div>
+                <div className="flex flex-col gap-0.5 flex-shrink-0">
+                  <label className="text-[9px] uppercase tracking-wider text-mortar-500">Hours</label>
+                  <select
+                    value={duration}
+                    onChange={e => setDuration(Number(e.target.value))}
+                    className="bg-mortar-950 border border-mortar-700 rounded px-2 py-2 text-sm text-cream focus:outline-none focus:border-ns-400"
+                  >
+                    {[1, 2, 3, 4, 6, 8].map(h => <option key={h} value={h}>{h}</option>)}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Rep selector — "All reps" toggle + multi-select grid */}
+            {activeCrews.length > 0 && (
+              <div className="px-5 py-4 border-b border-mortar-800 max-h-[40vh] overflow-y-auto">
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-[10px] uppercase tracking-wider text-mortar-500">
+                    Reps to consider
+                  </label>
+                  <button
+                    type="button"
+                    onClick={toggleAll}
+                    className={[
+                      'flex items-center gap-2 px-2.5 py-1 rounded-md text-[11px] font-semibold uppercase tracking-wider border transition',
+                      allSelected
+                        ? 'bg-ns-500 border-ns-400 text-white'
+                        : 'bg-mortar-950 border-mortar-700 text-mortar-300 hover:border-ns-500',
+                    ].join(' ')}
+                    title={allSelected
+                      ? 'Click to deselect all and pick reps individually'
+                      : 'Click to include every active rep'}
+                  >
+                    <span
+                      className={[
+                        'w-7 h-3.5 rounded-full relative transition flex-shrink-0',
+                        allSelected ? 'bg-white/30' : 'bg-mortar-700',
+                      ].join(' ')}
+                    >
+                      <span
+                        className={[
+                          'absolute top-0.5 w-2.5 h-2.5 rounded-full bg-white transition-all',
+                          allSelected ? 'left-3.5' : 'left-0.5',
+                        ].join(' ')}
+                      />
+                    </span>
+                    {allSelected ? 'All reps' : `${includedRepIds?.size || 0} selected`}
+                  </button>
+                </div>
+                {!allSelected && (
+                  <div className="text-[10px] text-mortar-500 mb-2">
+                    Each selected rep's best opening per day will be returned.
+                  </div>
+                )}
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                  {activeCrews.map(c => {
+                    const on = isRepIncluded(c.id)
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => toggleRep(c.id)}
+                        className={[
+                          'flex items-center gap-2 px-2 py-1.5 rounded-md text-[11px] font-medium border transition text-left',
+                          on
+                            ? 'text-white'
+                            : 'bg-mortar-950 border-mortar-800 text-mortar-400 hover:border-mortar-600',
+                        ].join(' ')}
+                        style={on ? { background: c.color, borderColor: c.color } : undefined}
+                        title={on ? `Click to exclude ${c.name}` : `Click to include ${c.name}`}
+                      >
+                        {c.avatar_url ? (
+                          <img
+                            src={c.avatar_url}
+                            alt=""
+                            className="w-5 h-5 rounded-full object-cover flex-shrink-0"
+                            referrerPolicy="no-referrer"
+                          />
+                        ) : (
+                          <span
+                            className="w-4 h-4 rounded-full flex-shrink-0 grid place-items-center text-[8px] font-bold text-white"
+                            style={{ background: on ? 'rgba(255,255,255,0.25)' : c.color }}
+                          >
+                            {c.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()}
+                          </span>
+                        )}
+                        <span className="truncate">{c.name}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Footer with primary action */}
+            <div className="px-5 py-3 bg-mortar-950/40 flex items-center justify-between gap-2">
+              <div className="text-[10px] text-mortar-500">
+                {query.length < 3 ? 'Type at least 3 characters, then pick from the list' :
+                 suggestions.length > 0 ? `${suggestions.length} match${suggestions.length === 1 ? '' : 'es'} — click one to search` :
+                 'Keep typing or refine the address'}
+              </div>
+              <button
+                type="button"
+                onClick={() => setSearchModalOpen(false)}
+                className="px-3 py-1.5 text-xs rounded border border-mortar-700 text-mortar-400 hover:text-mortar-200 hover:border-mortar-500"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Results drawer */}
       {resultsOpen && currentResult && (

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { formatTime } from '../lib/utils'
 import { crewDayMiles, crewDayDriveMin } from '../lib/recommender'
+import SuggestPanel from './SuggestPanel'
 import RepAvatar from './RepAvatar'
 
 export default function LeftPanel({
@@ -13,6 +14,10 @@ export default function LeftPanel({
   // Fit mode props
   fitResult,
   onExitFitMode,
+  // Suggest improvements (route optimizer) — renders an embedded button
+  // in the header. Optional; if not passed, the button doesn't render.
+  onApplySwap,
+  onFlash,
 }) {
   const [showIdle, setShowIdle] = useState(false)
 
@@ -304,14 +309,22 @@ export default function LeftPanel({
         </div>
       ) : (
         <div className="px-3 py-2 border-b border-mortar-800 bg-mortar-900">
-          <div className="flex items-center justify-between">
-            <div>
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
               <div className="text-[10px] uppercase tracking-[0.2em] text-ns-400">Sales Reps</div>
               <div className="text-sm font-semibold text-mortar-300">
                 {activeReps.length} active · {totalAssigned} task{totalAssigned === 1 ? '' : 's'}
               </div>
             </div>
-            <div className="font-display text-xl text-mortar-500 leading-none">//</div>
+            {onApplySwap && (
+              <SuggestPanel
+                crews={crews}
+                tasks={tasks}
+                onApplySwap={onApplySwap}
+                onFlash={onFlash}
+                embedded
+              />
+            )}
           </div>
         </div>
       )}

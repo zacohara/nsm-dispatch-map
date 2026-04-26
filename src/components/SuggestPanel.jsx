@@ -1,7 +1,11 @@
 import { useMemo, useState } from 'react'
 import { recommendSwaps } from '../lib/recommender'
 
-export default function SuggestPanel({ crews, tasks, onApplySwap, onFlash }) {
+// `embedded`: when true, the trigger renders as a small icon button suitable
+// for stuffing into an existing header (the LeftPanel). When false (legacy),
+// renders as the floating bottom-right pill. The modal portion is identical
+// either way.
+export default function SuggestPanel({ crews, tasks, onApplySwap, onFlash, embedded = false }) {
   const [open, setOpen] = useState(false)
   const [applyingId, setApplyingId] = useState(null)
   const [dismissedIds, setDismissedIds] = useState(() => new Set())
@@ -44,32 +48,61 @@ export default function SuggestPanel({ crews, tasks, onApplySwap, onFlash }) {
 
   return (
     <>
-      {/* Floating bottom-right button */}
-      <button
-        onClick={() => setOpen(v => !v)}
-        className={[
-          'fixed bottom-24 right-4 z-[2000] flex items-center gap-2',
-          'px-4 py-2.5 rounded-full font-semibold text-sm shadow-2xl',
-          'transition-all border-2',
-          suggestions.length > 0
-            ? 'bg-ns-500 hover:bg-ns-400 text-white border-ns-300 shadow-ns-900/50'
-            : 'bg-mortar-800 hover:bg-mortar-700 text-mortar-300 border-mortar-700',
-        ].join(' ')}
-        style={suggestions.length > 0 ? { animation: 'pulse-suggest 2.4s ease-in-out infinite' } : undefined}
-        title={suggestions.length > 0
-          ? `${suggestions.length} improvement${suggestions.length === 1 ? '' : 's'} available`
-          : 'No improvements found'}
-      >
-        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
-          <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
-        </svg>
-        <span>Suggest improvements</span>
-        {suggestions.length > 0 && (
-          <span className="ml-1 bg-white/25 px-2 py-0.5 rounded-full text-[11px] font-bold">
-            {suggestions.length}
-          </span>
-        )}
-      </button>
+      {embedded ? (
+        // Inline button — designed to live in the LeftPanel header. No fixed
+        // positioning, no animation by default (badge alone signals new
+        // suggestions). Compact enough to sit next to "9 active · 26 tasks".
+        <button
+          onClick={() => setOpen(v => !v)}
+          className={[
+            'flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-semibold uppercase tracking-wider border transition flex-shrink-0',
+            suggestions.length > 0
+              ? 'bg-ns-500/90 hover:bg-ns-400 text-white border-ns-300'
+              : 'bg-mortar-900 hover:bg-mortar-800 text-mortar-400 border-mortar-700',
+          ].join(' ')}
+          title={suggestions.length > 0
+            ? `${suggestions.length} improvement${suggestions.length === 1 ? '' : 's'} available — saves ${totalSaving}mi`
+            : 'No route improvements found'}
+        >
+          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+          </svg>
+          <span>Improve</span>
+          {suggestions.length > 0 && (
+            <span className="bg-white/30 px-1.5 py-0.5 rounded text-[9px] font-bold leading-none">
+              {suggestions.length}
+            </span>
+          )}
+        </button>
+      ) : (
+        // Legacy floating bottom-right pill. Kept for backward compat in case
+        // we want to use the panel in another surface later.
+        <button
+          onClick={() => setOpen(v => !v)}
+          className={[
+            'fixed bottom-24 right-4 z-[2000] flex items-center gap-2',
+            'px-4 py-2.5 rounded-full font-semibold text-sm shadow-2xl',
+            'transition-all border-2',
+            suggestions.length > 0
+              ? 'bg-ns-500 hover:bg-ns-400 text-white border-ns-300 shadow-ns-900/50'
+              : 'bg-mortar-800 hover:bg-mortar-700 text-mortar-300 border-mortar-700',
+          ].join(' ')}
+          style={suggestions.length > 0 ? { animation: 'pulse-suggest 2.4s ease-in-out infinite' } : undefined}
+          title={suggestions.length > 0
+            ? `${suggestions.length} improvement${suggestions.length === 1 ? '' : 's'} available`
+            : 'No improvements found'}
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+          </svg>
+          <span>Suggest improvements</span>
+          {suggestions.length > 0 && (
+            <span className="ml-1 bg-white/25 px-2 py-0.5 rounded-full text-[11px] font-bold">
+              {suggestions.length}
+            </span>
+          )}
+        </button>
+      )}
 
       {/* Modal */}
       {open && (

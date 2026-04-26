@@ -550,7 +550,7 @@ export default function MapView({
             icon={homeIcon(previewRep.color, true)}
             zIndexOffset={400}
           >
-            <Popup>
+            <Popup autoPanPaddingTopLeft={[40, 80]} autoPanPaddingBottomRight={[40, 60]} keepInView={true}>
               <div className="text-xs font-bold text-mortar-300">{previewRep.name}'s home base</div>
               <div className="text-[11px] text-mortar-500">{previewRep.home_town}</div>
             </Popup>
@@ -567,7 +567,7 @@ export default function MapView({
               icon={homeIcon(rep.color, true, rank)}
               zIndexOffset={500 - rank}
             >
-              <Popup>
+              <Popup autoPanPaddingTopLeft={[40, 80]} autoPanPaddingBottomRight={[40, 60]} keepInView={true}>
                 <div className="text-xs font-bold text-mortar-300">
                   #{rank} — {rep.name}'s home base
                 </div>
@@ -584,7 +584,7 @@ export default function MapView({
             icon={homeIcon(selectedCrew.color, true)}
             zIndexOffset={400}
           >
-            <Popup>
+            <Popup autoPanPaddingTopLeft={[40, 80]} autoPanPaddingBottomRight={[40, 60]} keepInView={true}>
               <div className="text-xs font-bold text-mortar-300">{selectedCrew.name}'s home base</div>
               <div className="text-[11px] text-mortar-500">{selectedCrew.home_town}</div>
             </Popup>
@@ -605,7 +605,7 @@ export default function MapView({
               icon={homeIcon(rep.color, true, null, { idle, compact: true })}
               zIndexOffset={idle ? 50 : 100}
             >
-              <Popup>
+              <Popup autoPanPaddingTopLeft={[40, 80]} autoPanPaddingBottomRight={[40, 60]} keepInView={true}>
                 <div className="text-xs font-bold text-mortar-300">{rep.name}'s home base</div>
                 <div className="text-[11px] text-mortar-500">{rep.home_town}</div>
                 {idle && (
@@ -670,7 +670,7 @@ export default function MapView({
                   }
                   zIndexOffset={item.isNew ? 3000 : 500 + idx}
                 >
-                  <Popup>
+                  <Popup autoPanPaddingTopLeft={[40, 80]} autoPanPaddingBottomRight={[40, 60]} keepInView={true}>
                     {item.isNew ? (
                       <div className="text-xs">
                         <div className="font-bold text-ns-400">New lead slot</div>
@@ -705,7 +705,7 @@ export default function MapView({
                 icon={teardropIcon(rep.color, initials, false, false)}
                 zIndexOffset={100}
               >
-                <Popup>
+                <Popup autoPanPaddingTopLeft={[40, 80]} autoPanPaddingBottomRight={[40, 60]} keepInView={true}>
                   <div className="text-xs">
                     <div className="font-bold text-mortar-300">{stop.job_name}</div>
                     <div className="text-mortar-500">{stop.job_address}</div>
@@ -733,7 +733,7 @@ export default function MapView({
                   eventHandlers={{ click: () => onSelectTask?.(t.id) }}
                   zIndexOffset={isHighlighted ? 2000 : 500 + i}
                 >
-                  <Popup>
+                  <Popup autoPanPaddingTopLeft={[40, 80]} autoPanPaddingBottomRight={[40, 60]} keepInView={true}>
                     <PopupCard task={t} rep={selectedCrew} stopNum={i + 1} stopTotal={selectedTasks.length} />
                   </Popup>
                 </Marker>
@@ -763,7 +763,7 @@ export default function MapView({
               eventHandlers={{ click: () => onSelectTask?.(t.id) }}
               zIndexOffset={isSelected ? 2000 : 0}
             >
-              <Popup>
+              <Popup autoPanPaddingTopLeft={[40, 80]} autoPanPaddingBottomRight={[40, 60]} keepInView={true}>
                 <PopupCard task={t} rep={crewObj} />
               </Popup>
             </Marker>
@@ -786,7 +786,7 @@ export default function MapView({
                 eventHandlers={{ click: () => onSelectTask?.(t.id) }}
                 zIndexOffset={0}
               >
-                <Popup>
+                <Popup autoPanPaddingTopLeft={[40, 80]} autoPanPaddingBottomRight={[40, 60]} keepInView={true}>
                   <PopupCard task={t} rep={crewObj} />
                 </Popup>
               </Marker>
@@ -796,7 +796,7 @@ export default function MapView({
         {/* Fit-search destination pin (any mode that includes fitResult) */}
         {fitResult?.lat != null && !isPreviewMode && (
           <Marker position={[fitResult.lat, fitResult.lng]} icon={fitIcon()} zIndexOffset={2500}>
-            <Popup>
+            <Popup autoPanPaddingTopLeft={[40, 80]} autoPanPaddingBottomRight={[40, 60]} keepInView={true}>
               <div className="text-xs">
                 <div className="font-bold text-ns-400 mb-1">New lead</div>
                 <div className="text-mortar-300">{fitResult.address}</div>
