@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { suggestSlotsAt } from '../lib/data'
+import { sortReps } from '../lib/utils'
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN
 const MAPBOX_ENDPOINT = 'https://api.mapbox.com/geocoding/v5/mapbox.places'
@@ -105,7 +106,7 @@ export default function FitPanel({
   onSelectRep,
 }) {
   const [query, setQuery] = useState('')
-  const [duration, setDuration] = useState(2)
+  const [duration, setDuration] = useState(1)
   const [searching, setSearching] = useState(false)
   const [suggestions, setSuggestions] = useState([])
   const [activeIdx, setActiveIdx] = useState(-1)
@@ -122,7 +123,7 @@ export default function FitPanel({
   const inputRef = useRef(null)
   const wrapRef = useRef(null)
 
-  const activeCrews = crews.filter(c => c.active !== false)
+  const activeCrews = sortReps(crews.filter(c => c.active !== false))
   const allSelected = includedRepIds === null
   const isRepIncluded = (id) => allSelected || includedRepIds.has(id)
   const toggleRep = (id) => {

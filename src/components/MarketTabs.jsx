@@ -24,13 +24,13 @@ export default function MarketTabs({ market, onChange, tasks }) {
   })()
 
   const tabs = [
-    { key: 'all', label: 'All', count: counts.all },
-    { key: 'chicago', label: 'Chicago', count: counts.chicago },
-    { key: 'milwaukee', label: 'Milwaukee', count: counts.milwaukee },
+    { key: 'all', label: 'All', shortLabel: 'All', count: counts.all },
+    { key: 'chicago', label: 'Chicago', shortLabel: 'CHI', count: counts.chicago },
+    { key: 'milwaukee', label: 'Milwaukee', shortLabel: 'MKE', count: counts.milwaukee },
   ]
 
   return (
-    <div className="flex items-center gap-1 bg-mortar-950/60 border border-mortar-800 rounded-lg p-0.5">
+    <div className="flex items-center gap-0.5 sm:gap-1 bg-mortar-950/60 border border-mortar-800 rounded-lg p-0.5">
       {tabs.map(t => {
         const active = market === t.key
         return (
@@ -38,16 +38,18 @@ export default function MarketTabs({ market, onChange, tasks }) {
             key={t.key}
             onClick={() => onChange(t.key)}
             className={[
-              'px-3 py-1.5 rounded-md text-[11px] font-semibold transition-all flex items-center gap-1.5',
+              'px-2 sm:px-3 py-1 sm:py-1.5 rounded-md text-[10px] sm:text-[11px] font-semibold transition-all flex items-center gap-1 sm:gap-1.5',
               active
                 ? 'bg-ns-500 text-white shadow-sm shadow-ns-900/50'
                 : 'text-mortar-400 hover:text-mortar-200 hover:bg-mortar-900',
             ].join(' ')}
             title={t.key === 'all' ? 'Chicago + Milwaukee focus · outlier pins still shown' : `Focus on ${t.label}`}
           >
-            {t.label}
+            {/* Full label on tablet+, abbreviated CHI/MKE on mobile to keep the row tight */}
+            <span className="hidden sm:inline">{t.label}</span>
+            <span className="sm:hidden">{t.shortLabel}</span>
             <span className={[
-              'text-[9px] px-1.5 py-0.5 rounded font-mono leading-none',
+              'text-[9px] px-1 sm:px-1.5 py-0.5 rounded font-mono leading-none',
               active ? 'bg-white/20' : 'bg-mortar-800 text-mortar-500',
             ].join(' ')}>
               {t.count}

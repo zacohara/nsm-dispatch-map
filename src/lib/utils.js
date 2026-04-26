@@ -12,6 +12,52 @@
 export const DISPATCH_WINDOW_DAYS = 14
 export const FIT_WINDOW_DAYS = 5
 
+// ── Rep display order ────────────────────────────────────────────
+// Hardcoded sort priority for sales reps in dispatch surfaces (the search
+// modal's rep grid, the LeftPanel, the timeline, etc.). Lower number = higher
+// priority. Reps not in this map fall to a default of 500, so any new rep
+// added to the table appears in the "middle bucket" alphabetically without
+// breaking existing layouts.
+//
+// Rationale for this exact order: priority list per Zac (oct 2026) — the
+// names Cortney needs to consider FIRST when fitting leads. After Stephen
+// the order is alphabetical for the "middle bucket" reps. Erick is pinned
+// last per Zac's instruction. Zac himself is deactivated entirely — no
+// dispatch UI will ever show him.
+const REP_ORDER = {
+  'rep-les-ohara':         10,
+  'rep-paul-boidanis':     20,
+  'rep-luke-bergman':      30,
+  'rep-jace-ohara':        40,
+  'rep-carlos-celleri':    50,
+  'rep-frankie-perez':     60,
+  'rep-roman':             70,
+  'rep-wilmar-hernandez':  80,
+  'rep-stephen-riley':     90,
+  // Middle bucket (alphabetical): no specific priority but kept active
+  'rep-bj-tippmann':      100,
+  'rep-cortney-campbell': 110,
+  'rep-devin-ohara':      120,
+  'rep-roberto-rr':       130,
+  'rep-team-eagle-lopez': 140,
+  // Pinned last
+  'rep-erick-macias':     999,
+}
+
+// Returns a NEW sorted array — does not mutate input. Use everywhere we
+// render reps so the order is consistent across the search modal, timeline,
+// sidebar, and tier admin. Falls back to alphabetical name comparison for
+// reps not in the priority map (gives any future reps a stable position
+// without needing a code change).
+export function sortReps(crews) {
+  return [...crews].sort((a, b) => {
+    const pa = REP_ORDER[a.id] ?? 500
+    const pb = REP_ORDER[b.id] ?? 500
+    if (pa !== pb) return pa - pb
+    return (a.name || '').localeCompare(b.name || '')
+  })
+}
+
 export function todayISO() {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`

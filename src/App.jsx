@@ -209,7 +209,6 @@ export default function App() {
           <div className="flex flex-col leading-none min-w-0">
             <div className="font-display text-cream text-[18px] sm:text-[24px] tracking-tight whitespace-nowrap">
               <span className="hidden sm:inline">North Shore </span>
-              <span className="sm:hidden">NS </span>
               <span className="text-ns-400">Dispatch</span>
             </div>
             <div className="mt-1 since-stamp hidden sm:flex">

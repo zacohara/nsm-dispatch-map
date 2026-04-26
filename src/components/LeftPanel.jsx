@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { formatTime } from '../lib/utils'
 import { crewDayMiles, crewDayDriveMin } from '../lib/recommender'
 import SuggestPanel from './SuggestPanel'
+import { sortReps } from '../lib/utils'
 import RepAvatar from './RepAvatar'
 
 export default function LeftPanel({
@@ -81,17 +82,25 @@ export default function LeftPanel({
       if (t.length > 0 || b.length > 0) active.push({ crew: c, tasks: t, blockers: b })
       else idle.push(c)
     }
-    // Sort: reps with real work first (by task count), then blocker-only reps
+    // Sort: reps with real work first (by task count). When two reps have
+    // equal task counts (or both have 0), fall back to the global priority
+    // order (Les → Paul → Luke → ... → Erick) instead of alphabetical so
+    // Cortney sees her go-to reps first.
+    const priorityIdx = (id) => {
+      const sorted = sortReps([{ id }, ...crews.filter(c => c.id !== id)])
+      return sorted.findIndex(c => c.id === id)
+    }
     active.sort((a, b) => {
       const aHasWork = a.tasks.length > 0, bHasWork = b.tasks.length > 0
       if (aHasWork !== bHasWork) return bHasWork - aHasWork
-      if (aHasWork) return b.tasks.length - a.tasks.length || a.crew.name.localeCompare(b.crew.name)
-      return a.crew.name.localeCompare(b.crew.name)
+      if (aHasWork && a.tasks.length !== b.tasks.length) return b.tasks.length - a.tasks.length
+      return priorityIdx(a.crew.id) - priorityIdx(b.crew.id)
     })
-    idle.sort((a, b) => a.name.localeCompare(b.name))
+    // Idle reps: in priority order, not alphabetical.
+    const idleSorted = sortReps(idle)
     return {
       activeReps: active,
-      idleReps: idle,
+      idleReps: idleSorted,
       unassigned: groups.get('__unassigned__') || [],
     }
   }, [isFitMode, crews, groups, blockerGroups])
