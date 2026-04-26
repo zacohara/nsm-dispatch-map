@@ -199,6 +199,43 @@ html, body, #root {
   transform: rotate(-4deg) scale(1.12);
   box-shadow: 0 4px 14px rgba(0,0,0,0.6), 0 0 0 3px rgba(255,255,255,0.1);
 }
+/* Compact variant — used in default mode so all 8 home pins don't fight
+   for attention with the actual job pins. About 78% of full size, lighter
+   border, softer shadow. Keeps active scale-up but gentler. */
+.home-pin.compact {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1.5px solid rgba(255,255,255,0.7);
+  box-shadow: 0 2px 5px rgba(0,0,0,0.35);
+  opacity: 0.65;
+}
+.home-pin.compact.active {
+  opacity: 0.9;
+  transform: rotate(-4deg) scale(1.05);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.45), 0 0 0 2px rgba(255,255,255,0.08);
+}
+.home-pin.compact span {
+  font-size: 11px;
+}
+/* Idle variant — rep has no work scheduled for the visible day. Desaturated,
+   reduced opacity, and the home emoji loses its color. Visually demotes
+   these pins so the working reps' homes pop. */
+.home-pin.idle {
+  opacity: 0.35;
+  filter: grayscale(0.85);
+  border-color: rgba(255,255,255,0.45);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
+.home-pin.idle.active {
+  /* Even when "active" (default-mode rendering), idle stays demoted */
+  opacity: 0.4;
+  transform: rotate(-4deg) scale(1);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
+.home-pin.idle span {
+  filter: grayscale(1) opacity(0.7);
+}
 .home-pin span {
   font-size: 14px;
   transform: rotate(4deg);

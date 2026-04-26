@@ -162,17 +162,33 @@ function numberedIcon(color, n, isHighlighted) {
 }
 
 // Home marker
-function homeIcon(color, isActive, rank) {
-  const cls = 'home-pin' + (isActive ? ' active' : '')
+// homeIcon variants:
+//   isActive=true, idle=false: full-strength rep-color pin (working today)
+//   isActive=true, idle=true:  greyscale + reduced opacity (no work today)
+//   isActive=false: dimmed default
+// `compact` shrinks the pin for default-mode rendering so the cluster of home
+// bases doesn't dominate the map. Selected/preview/route modes keep full size.
+function homeIcon(color, isActive, rank, opts = {}) {
+  const { idle = false, compact = false } = opts
+  const cls = [
+    'home-pin',
+    isActive ? 'active' : '',
+    idle ? 'idle' : '',
+    compact ? 'compact' : '',
+  ].filter(Boolean).join(' ')
   const rankBadge = rank != null
     ? `<div class="home-rank">${rank}</div>`
     : ''
+  // Idle pins use a desaturated grey background so the rep color isn't fully lost
+  const bg = idle ? '#4a5263' : color
+  const size = compact ? 22 : 28
+  const half = size / 2
   return L.divIcon({
     className: '',
-    html: `<div class="${cls}" style="background:${color}"><span>🏠</span>${rankBadge}</div>`,
-    iconSize: [28, 28],
-    iconAnchor: [14, 14],
-    popupAnchor: [0, -14],
+    html: `<div class="${cls}" style="background:${bg}"><span>🏠</span>${rankBadge}</div>`,
+    iconSize: [size, size],
+    iconAnchor: [half, half],
+    popupAnchor: [0, -half],
   })
 }
 
@@ -404,6 +420,19 @@ export default function MapView({
     [crews]
   )
 
+  // Set of rep ids that have at least one real (non-blocker) task on the
+  // visible day. Used to grey out the home base markers for reps who are
+  // idle today, so Cortney can scan the map and see "who's actually working"
+  // without the home pins competing for attention.
+  const repsWithWorkToday = useMemo(() => {
+    const ids = new Set()
+    for (const t of tasks || []) {
+      if (t.is_blocker) continue
+      if (t.crew_id) ids.add(t.crew_id)
+    }
+    return ids
+  }, [tasks])
+
   // ========= Bounds =========
   const boundsPoints = useMemo(() => {
     if (isPreviewMode && previewRoutePositions) {
@@ -562,20 +591,30 @@ export default function MapView({
           </Marker>
         )}
 
-        {/* Default mode: all 7 homes */}
-        {!isPreviewMode && !isFitMode && !isRouteMode && repsWithHome.map(rep => (
-          <Marker
-            key={`home-${rep.id}`}
-            position={[rep.home_lat, rep.home_lng]}
-            icon={homeIcon(rep.color, true)}
-            zIndexOffset={100}
-          >
-            <Popup>
-              <div className="text-xs font-bold text-mortar-300">{rep.name}'s home base</div>
-              <div className="text-[11px] text-mortar-500">{rep.home_town}</div>
-            </Popup>
-          </Marker>
-        ))}
+        {/* Default mode: all home-base pins. Smaller (compact) than the
+            other modes so they don't dominate the map, and grey-shaded
+            (idle) when that rep has no real work scheduled for the visible
+            day. zIndexOffset is lowered for idle reps so working reps' homes
+            sit on top when they cluster (Luke + Paul both in Prospect Heights). */}
+        {!isPreviewMode && !isFitMode && !isRouteMode && repsWithHome.map(rep => {
+          const idle = !repsWithWorkToday.has(rep.id)
+          return (
+            <Marker
+              key={`home-${rep.id}`}
+              position={[rep.home_lat, rep.home_lng]}
+              icon={homeIcon(rep.color, true, null, { idle, compact: true })}
+              zIndexOffset={idle ? 50 : 100}
+            >
+              <Popup>
+                <div className="text-xs font-bold text-mortar-300">{rep.name}'s home base</div>
+                <div className="text-[11px] text-mortar-500">{rep.home_town}</div>
+                {idle && (
+                  <div className="text-[10px] text-mortar-500 italic mt-1">No work scheduled today</div>
+                )}
+              </Popup>
+            </Marker>
+          )
+        })}
 
         {/* ========= ROUTE LINES & PINS ========= */}
 

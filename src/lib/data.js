@@ -130,11 +130,15 @@ export async function suggestSlots({ address, duration_hrs = 2 }) {
 // lets suggest-slots skip its Nominatim lookup step. rep_ids is an optional
 // array of dispatch_crews.id values to restrict the search to; omit or pass
 // null/empty to consider every active rep.
-export async function suggestSlotsAt({ address, lat, lng, duration_hrs = 2, rep_ids = null }) {
+//
+// lock_per_rep: when true (and rep_ids has at least one rep), the backend
+// returns each selected rep's best slots PER DAY across the window instead
+// of global top-5. Lets Cortney compare e.g. Frankie + Roman + Luke side-by-side.
+export async function suggestSlotsAt({ address, lat, lng, duration_hrs = 2, rep_ids = null, lock_per_rep = false }) {
   const r = await fetch('/api/suggest-slots', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ address, lat, lng, duration_hrs, rep_ids }),
+    body: JSON.stringify({ address, lat, lng, duration_hrs, rep_ids, lock_per_rep }),
   })
   if (!r.ok) throw new Error(`Suggest failed: ${r.status}`)
   return r.json()

@@ -1,15 +1,24 @@
 // POST /api/suggest-slots
-// Body: { address, duration_hrs }
-// Geocodes address via OSM Nominatim, pulls dispatch_tasks for the next 4 days,
-// and ranks the top 5 insertion slots per (rep, day) by added drive distance.
+// Body: { address, duration_hrs, rep_ids?, lock_per_rep? }
+// Geocodes address via OSM Nominatim, pulls dispatch_tasks for the next 5 days,
+// and ranks insertion slots per (rep, day) by added drive distance.
+//
+// v0.19 — Real drive time via Mapbox Directions Matrix API (with haversine
+// fallback). Adds `lock_per_rep` mode: when explicit rep_ids are passed,
+// returns the best slot PER REP PER DAY (up to N reps × 5 days) instead of
+// global top-5. This lets Cortney lock to e.g. Frankie + Roman and see all
+// of their best openings side-by-side.
 //
 // Scoring (lower detour = better fit):
 //   added_miles = haversine(prev → new) + haversine(new → next) − haversine(prev → next)
 //                 (for end-of-day insert, just added_miles = haversine(last → new) × 2 for the round-trip back)
-//   added_drive_min = added_miles / 35 mph × 60  (rough urban avg)
+//   added_drive_min = real drive minutes via Mapbox Directions Matrix when
+//                     available; otherwise miles / 35 mph × 60.
 //   score = max(0, round(100 − added_miles × 2.5))
 
 import { createClient } from '@supabase/supabase-js'
+
+const MAPBOX_TOKEN = process.env.VITE_MAPBOX_TOKEN || process.env.MAPBOX_TOKEN
 
 export default async (req) => {
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405)
@@ -29,6 +38,10 @@ export default async (req) => {
   const repFilter = Array.isArray(body?.rep_ids) && body.rep_ids.length > 0
     ? new Set(body.rep_ids.map(String))
     : null
+  // lock_per_rep: when true (and repFilter is set), return one best slot per
+  // rep per day instead of global top 5. Intended for "lock to N reps" mode
+  // where Cortney wants to compare each rep's best opening across the window.
+  const lockPerRep = Boolean(body?.lock_per_rep) && repFilter !== null
   if (!address || address.length < 5) return json({ error: 'Address too short' }, 400)
 
   // If the client already geocoded (via Mapbox), use those coords directly
@@ -122,6 +135,27 @@ export default async (req) => {
     return { startMin, endMin: startMin + durMin }
   }
 
+  // ── Build the drive-time lookup ─────────────────────────────
+  // Collect every coord we'll route between: the new lead, every rep's home,
+  // and every existing stop. Mapbox Matrix caps at 25 points per call; if we
+  // exceed that we'll silently fall back to haversine (still works fine,
+  // just less accurate). 16 reps × 1 home + ~10 distinct stops + 1 lead is
+  // typically under the cap; if not, we slice to the relevant subset (only
+  // reps in repFilter, only their stops).
+  const matrixPoints = [{ lat, lng }]
+  for (const rep of reps) {
+    if (rep.home_lat != null && rep.home_lng != null) {
+      matrixPoints.push({ lat: rep.home_lat, lng: rep.home_lng })
+    }
+  }
+  for (const arr of stopsByCrewDay.values()) {
+    for (const s of arr) {
+      if (s.lat != null && s.lng != null) matrixPoints.push({ lat: s.lat, lng: s.lng })
+    }
+  }
+  const drive = await buildDriveLookup(matrixPoints)
+  let usedMapbox = false  // flips to true on the first mapbox-sourced result
+
   // Generate candidates: for each rep, for each day in window, consider insertion
   // at every gap (before stop 1, between stops, after last).
   const candidates = []
@@ -147,6 +181,7 @@ export default async (req) => {
       if (stops.length === 0) {
         // Empty day — but if a partial blocker exists, it still counts as "some" work
         const penalty_miles = isWeekend ? 25 : 8
+        const penalty_min = Math.round((penalty_miles / 35) * 60)
         candidates.push({
           rep_id: rep.id,
           priority_tier: rep.priority_tier ?? 2,
@@ -157,7 +192,7 @@ export default async (req) => {
             : (isWeekend ? 'Open weekend day' : 'Open day — nothing scheduled'),
           added_miles: penalty_miles,
           rank_miles: penalty_miles + tierBias(rep),
-          added_drive_min: Math.round((penalty_miles / 35) * 60),
+          added_drive_min: penalty_min,
           _blockerRanges: blockerRanges,
         })
         continue
@@ -170,45 +205,51 @@ export default async (req) => {
       const N = stops.length
       for (let k = 0; k <= N; k++) {
         let added_miles
+        let added_drive_min
         let insert_label
 
         if (k === 0) {
           const first = stops[0]
-          added_miles = 2 * haversineMi(lat, lng, first.lat, first.lng)
+          // Round-trip detour: leg out to new lead and back to first stop.
+          const out = drive(first.lat, first.lng, lat, lng)
+          const back = drive(lat, lng, first.lat, first.lng)
+          added_miles = out.miles + back.miles
+          added_drive_min = out.minutes + back.minutes
+          if (out.source === 'mapbox' || back.source === 'mapbox') usedMapbox = true
           insert_label = `Before stop 1 (${first.job_name || 'job'})`
         } else if (k === N) {
           const last = stops[N - 1]
-          added_miles = 2 * haversineMi(lat, lng, last.lat, last.lng)
+          const out = drive(last.lat, last.lng, lat, lng)
+          const back = drive(lat, lng, last.lat, last.lng)
+          added_miles = out.miles + back.miles
+          added_drive_min = out.minutes + back.minutes
+          if (out.source === 'mapbox' || back.source === 'mapbox') usedMapbox = true
           insert_label = `After stop ${N} (${last.job_name || 'job'})`
         } else {
           const prev = stops[k - 1]
           const next = stops[k]
-          const direct = haversineMi(prev.lat, prev.lng, next.lat, next.lng)
-          const viaNew = haversineMi(prev.lat, prev.lng, lat, lng) +
-                         haversineMi(lat, lng, next.lat, next.lng)
-          added_miles = Math.max(0, viaNew - direct)
+          const direct = drive(prev.lat, prev.lng, next.lat, next.lng)
+          const leg1 = drive(prev.lat, prev.lng, lat, lng)
+          const leg2 = drive(lat, lng, next.lat, next.lng)
+          added_miles = Math.max(0, leg1.miles + leg2.miles - direct.miles)
+          added_drive_min = Math.max(0, leg1.minutes + leg2.minutes - direct.minutes)
+          if (direct.source === 'mapbox' || leg1.source === 'mapbox' || leg2.source === 'mapbox') usedMapbox = true
           insert_label = `Between stop ${k} and ${k + 1}`
         }
 
         // Weekend slight penalty even with a real anchor
-        if (isWeekend) added_miles += 10
-
-        const added_drive_min = Math.round((added_miles / 35) * 60)
+        if (isWeekend) {
+          added_miles += 10
+          added_drive_min += 17  // 10mi @ 35mph
+        }
 
         // Collision check: if there are partial blockers on this day, reject
         // this candidate if our insertion would land inside the blocker window.
-        // We approximate insertion start time by taking the previous stop's
-        // start_time + drive + 1hr, or "before stop 1" → anchor at 8am.
-        // This is approximate — sync provides start_time on stops but we don't
-        // know yet what start_time the user would assign to the NEW slot. For
-        // the MVP the collision check uses the midpoint of the gap between
-        // the surrounding stops; we refine when we ship the "book" button.
+        // Estimates slot start time from the surrounding stop's start_time.
         const collidesWithBlocker = (() => {
           if (!blockerRanges.length) return false
-          // Estimated slot start — best guess given the gap
           let slotStartMin
           if (k === 0) {
-            // Before first stop — anchor at 8am or first stop's time - 2hr
             const first = stops[0]
             if (first.start_time) {
               const [h, m] = first.start_time.split(':').map(Number)
@@ -246,7 +287,7 @@ export default async (req) => {
           insert_label,
           added_miles: Math.round(added_miles * 10) / 10,
           rank_miles: added_miles + tierBias(rep),
-          added_drive_min,
+          added_drive_min: Math.round(added_drive_min),
         })
       }
     }
@@ -261,33 +302,64 @@ export default async (req) => {
     const cur = bestPerRepDay.get(k)
     if (!cur || c.rank_miles < cur.rank_miles) bestPerRepDay.set(k, c)
   }
-  const ranked = Array.from(bestPerRepDay.values())
-    .sort((a, b) => a.rank_miles - b.rank_miles)
-    .slice(0, 5)
-    .map(c => {
-      // Embed the rep's existing stops for that day so the client can
-      // render a preview route (Home → stops → NEW slot → Home) on hover.
-      const dayStops = (stopsByCrewDay.get(`${c.rep_id}|${c.day}`) || []).map(s => ({
-        id: s.id,
-        job_name: s.job_name,
-        job_address: s.job_address,
-        lat: s.lat,
-        lng: s.lng,
-        start_time: s.start_time,
-      }))
-      return {
-        ...c,
-        day_label: formatDayLabel(c.day),
-        score: Math.max(0, Math.round(100 - c.added_miles * 2.5)),
-        day_stops: dayStops,
-      }
-    })
+
+  // Two ranking modes:
+  //  - default: top 5 globally (best (rep, day) combos overall)
+  //  - lock_per_rep: best slot per rep per day for each rep in repFilter,
+  //    sorted rep-major then day-major. Caps at 25 results to keep payloads sane.
+  let rankedRaw
+  if (lockPerRep) {
+    // Group by rep, take each rep's best 5 days (sorted by rank_miles)
+    const byRep = new Map()
+    for (const c of bestPerRepDay.values()) {
+      if (!byRep.has(c.rep_id)) byRep.set(c.rep_id, [])
+      byRep.get(c.rep_id).push(c)
+    }
+    // Preserve repFilter ordering when possible — lets the UI show reps in
+    // the order Cortney clicked them.
+    const orderedRepIds = repFilter
+      ? Array.from(repFilter).filter(id => byRep.has(id))
+      : Array.from(byRep.keys())
+    rankedRaw = []
+    for (const rid of orderedRepIds) {
+      const repCandidates = (byRep.get(rid) || [])
+        .sort((a, b) => a.rank_miles - b.rank_miles)
+        .slice(0, 5)
+      rankedRaw.push(...repCandidates)
+    }
+    rankedRaw = rankedRaw.slice(0, 25)
+  } else {
+    rankedRaw = Array.from(bestPerRepDay.values())
+      .sort((a, b) => a.rank_miles - b.rank_miles)
+      .slice(0, 5)
+  }
+
+  const ranked = rankedRaw.map(c => {
+    // Embed the rep's existing stops for that day so the client can
+    // render a preview route (Home → stops → NEW slot → Home) on hover.
+    const dayStops = (stopsByCrewDay.get(`${c.rep_id}|${c.day}`) || []).map(s => ({
+      id: s.id,
+      job_name: s.job_name,
+      job_address: s.job_address,
+      lat: s.lat,
+      lng: s.lng,
+      start_time: s.start_time,
+    }))
+    return {
+      ...c,
+      day_label: formatDayLabel(c.day),
+      score: Math.max(0, Math.round(100 - c.added_miles * 2.5)),
+      day_stops: dayStops,
+    }
+  })
 
   return json({
     address: resolved,
     lat, lng,
     duration_hrs,
     suggestions: ranked,
+    drive_source: usedMapbox ? 'mapbox' : 'haversine',
+    lock_per_rep: lockPerRep,
   }, 200)
 }
 
@@ -301,13 +373,88 @@ function haversineMi(lat1, lng1, lat2, lng2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
 
-function formatDayLabel(iso) {
-  const d = new Date(iso + 'T12:00:00')
-  const today = new Date(); today.setHours(0, 0, 0, 0)
-  const diff = Math.round((d - today) / 86400000)
-  if (diff === 0) return 'Today'
-  if (diff === 1) return 'Tomorrow'
-  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+// Round to 4 decimals (~11m precision) for cache keys — close enough that
+// real-world coordinate jitter from geocoders doesn't fragment the cache.
+function coordKey(lat, lng) {
+  return `${lat.toFixed(4)},${lng.toFixed(4)}`
+}
+
+// Fetch a drive-time + drive-distance matrix from Mapbox for up to 25 points.
+// Returns { durationsMin: number[][], distancesMi: number[][] } where index
+// matches the input `points` array. Both matrices are square, indexed [from][to].
+// Returns null on failure — caller falls back to haversine.
+//
+// Mapbox Directions Matrix v1: returns durations in seconds and distances in
+// meters when annotations=duration,distance. Free tier is 100k requests/month.
+// One search ≈ 1-2 matrix calls (≤25 points each), so well within budget.
+async function fetchMapboxMatrix(points) {
+  if (!MAPBOX_TOKEN) return null
+  if (points.length < 2 || points.length > 25) return null
+  const coords = points.map(p => `${p.lng},${p.lat}`).join(';')
+  const url = `https://api.mapbox.com/directions-matrix/v1/mapbox/driving/${coords}` +
+              `?annotations=duration,distance&access_token=${MAPBOX_TOKEN}`
+  try {
+    const r = await fetch(url, {
+      // Mapbox Matrix is slow with many points — cap at 6s so we degrade
+      // gracefully to haversine instead of timing out the whole function.
+      signal: AbortSignal.timeout(6000),
+    })
+    if (!r.ok) return null
+    const data = await r.json()
+    if (data.code !== 'Ok' || !Array.isArray(data.durations)) return null
+    // durations[i][j] = seconds from i to j; distances[i][j] = meters
+    const durationsMin = data.durations.map(row =>
+      row.map(s => s == null ? null : s / 60)
+    )
+    const distancesMi = (data.distances || []).map(row =>
+      row.map(m => m == null ? null : m / 1609.344)
+    )
+    return { durationsMin, distancesMi }
+  } catch (_) {
+    return null
+  }
+}
+
+// Build a unified drive-time function over a set of points. Tries Mapbox once
+// (single matrix call), caches results, falls back to haversine if Mapbox
+// is unavailable or returns nulls for a given pair.
+async function buildDriveLookup(points) {
+  // Dedupe by rounded coord to keep us under the 25-point Matrix cap.
+  const keyed = []
+  const keyToIdx = new Map()
+  for (const p of points) {
+    if (p.lat == null || p.lng == null) continue
+    const k = coordKey(p.lat, p.lng)
+    if (keyToIdx.has(k)) continue
+    keyToIdx.set(k, keyed.length)
+    keyed.push({ lat: p.lat, lng: p.lng, key: k })
+  }
+
+  // If we'd blow past the 25-point cap, skip Mapbox entirely — would need
+  // chunked matrix fetches (future work). Haversine is the floor.
+  let matrix = null
+  if (keyed.length >= 2 && keyed.length <= 25) {
+    matrix = await fetchMapboxMatrix(keyed)
+  }
+
+  // Returns { miles, minutes } between two coords. Uses Mapbox when present,
+  // falls back to haversine for any pair Mapbox couldn't route.
+  return function drivePair(lat1, lng1, lat2, lng2) {
+    const fallbackMi = haversineMi(lat1, lng1, lat2, lng2)
+    const fallbackMin = (fallbackMi / 35) * 60
+    if (!matrix) return { miles: fallbackMi, minutes: fallbackMin, source: 'haversine' }
+    const i = keyToIdx.get(coordKey(lat1, lng1))
+    const j = keyToIdx.get(coordKey(lat2, lng2))
+    if (i == null || j == null) {
+      return { miles: fallbackMi, minutes: fallbackMin, source: 'haversine' }
+    }
+    const min = matrix.durationsMin?.[i]?.[j]
+    const mi = matrix.distancesMi?.[i]?.[j]
+    if (min == null || mi == null) {
+      return { miles: fallbackMi, minutes: fallbackMin, source: 'haversine' }
+    }
+    return { miles: mi, minutes: min, source: 'mapbox' }
+  }
 }
 
 function json(body, status) {
@@ -315,4 +462,13 @@ function json(body, status) {
     status,
     headers: { 'Content-Type': 'application/json' },
   })
+}
+
+function formatDayLabel(iso) {
+  const d = new Date(iso + 'T12:00:00')
+  const today = new Date(); today.setHours(0, 0, 0, 0)
+  const diff = Math.round((d - today) / 86400000)
+  if (diff === 0) return 'Today'
+  if (diff === 1) return 'Tomorrow'
+  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
 }

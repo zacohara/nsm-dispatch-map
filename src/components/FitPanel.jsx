@@ -199,12 +199,17 @@ export default function FitPanel({
     setSearching(true)
     setDropdownOpen(false)
     try {
+      // When the user has narrowed to a specific rep set, auto-engage
+      // lock-per-rep mode so they see each chosen rep's openings across
+      // the 5-day window instead of just the single best (rep, day) overall.
+      const lockPerRep = includedRepIds !== null && includedRepIds.size > 0
       const r = await suggestSlotsAt({
         address: picked.address,
         lat: picked.lat,
         lng: picked.lng,
         duration_hrs: duration,
         rep_ids: includedRepIds === null ? null : Array.from(includedRepIds),
+        lock_per_rep: lockPerRep,
       })
       if (!r?.lat) {
         onFlash?.('Could not find that address', 'error')
@@ -275,6 +280,24 @@ export default function FitPanel({
   }
 
   const fitSuggestions = currentResult?.suggestions || []
+  const isLockMode = Boolean(currentResult?.lock_per_rep)
+  const driveSource = currentResult?.drive_source
+
+  // In lock mode, group suggestions by rep so we can render rep-section headers
+  // with the rep's avatar, name, and tier — followed by their per-day slots.
+  // In default mode this stays a flat list.
+  const groupedByRep = (() => {
+    if (!isLockMode) return null
+    const groups = new Map()
+    fitSuggestions.forEach(s => {
+      if (!groups.has(s.rep_id)) groups.set(s.rep_id, [])
+      groups.get(s.rep_id).push(s)
+    })
+    return Array.from(groups.entries()).map(([repId, slots]) => ({
+      rep: crews.find(c => c.id === repId),
+      slots,
+    }))
+  })()
 
   // Short display for the locked address
   const lockedAddressShort = currentResult?.address?.split(',').slice(0, 2).join(',')
@@ -317,7 +340,7 @@ export default function FitPanel({
                 ? 'bg-ns-500 border-ns-400 text-white'
                 : 'bg-mortar-900 border-mortar-700 text-mortar-400 hover:border-ns-500',
             ].join(' ')}
-            title="Include every active rep in the fit search"
+            title={allSelected ? 'Searching across every active rep' : 'Lock search to selected reps — see each rep\'s best openings across the 5-day window'}
           >
             <span
               className={[
@@ -332,7 +355,7 @@ export default function FitPanel({
                 ].join(' ')}
               />
             </span>
-            All reps
+            {allSelected ? 'All reps' : `Locked${includedRepIds && includedRepIds.size > 0 ? ` (${includedRepIds.size})` : ''}`}
           </button>
           <div className="w-px h-5 bg-mortar-800 flex-shrink-0" />
           {activeCrews.map(c => {
@@ -446,7 +469,19 @@ export default function FitPanel({
         <div className="absolute bottom-full left-0 right-0 bg-mortar-900 border-t border-ns-600 shadow-[0_-8px_24px_rgba(0,0,0,0.5)] max-h-[40vh] overflow-y-auto z-20">
           <div className="px-3 py-2 border-b border-mortar-800 flex items-center justify-between sticky top-0 bg-mortar-900 z-10">
             <div className="flex-1 min-w-0">
-              <div className="text-[10px] uppercase tracking-wider text-ns-400 font-display">Recommended slots</div>
+              <div className="flex items-center gap-2">
+                <div className="text-[10px] uppercase tracking-wider text-ns-400 font-display">
+                  {isLockMode ? `Locked to ${groupedByRep?.length || 0} rep${groupedByRep?.length === 1 ? '' : 's'}` : 'Recommended slots'}
+                </div>
+                {driveSource === 'mapbox' && (
+                  <span
+                    className="text-[8px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-900/40 text-emerald-300 border border-emerald-700/40"
+                    title="Detour calculated from real driving routes via Mapbox"
+                  >
+                    Live drive time
+                  </span>
+                )}
+              </div>
               <div className="text-xs text-mortar-300 truncate">{currentResult.address}</div>
             </div>
             <div className="text-[10px] text-mortar-500 mx-2">Hover to preview · Click to select</div>
@@ -458,66 +493,86 @@ export default function FitPanel({
 
           {fitSuggestions.length === 0 ? (
             <div className="px-4 py-6 text-center text-xs text-mortar-500">
-              No good fits in the next 4 days — every rep's route is full or too far.
+              {isLockMode
+                ? 'No openings for the locked rep(s) in the next 5 days — try widening the rep filter.'
+                : "No good fits in the next 5 days — every rep's route is full or too far."}
+            </div>
+          ) : isLockMode && groupedByRep ? (
+            // Lock mode: rep-major grouping. One section per rep, days under each.
+            <div>
+              {groupedByRep.map(({ rep, slots }) => (
+                <div key={rep?.id || 'unknown'} className="border-b border-mortar-800 last:border-b-0">
+                  {/* Rep header */}
+                  <div
+                    className="px-3 py-2 flex items-center gap-2 sticky top-[52px] z-[5]"
+                    style={{
+                      background: `linear-gradient(90deg, ${rep?.color || '#4a9dcf'}22 0%, var(--mortar-950) 70%)`,
+                      borderLeft: `3px solid ${rep?.color || '#4a9dcf'}`,
+                    }}
+                  >
+                    {rep?.avatar_url ? (
+                      <img
+                        src={rep.avatar_url}
+                        alt=""
+                        className="w-6 h-6 rounded-full object-cover flex-shrink-0"
+                        style={{ boxShadow: `0 0 0 2px ${rep.color}` }}
+                        referrerPolicy="no-referrer"
+                      />
+                    ) : (
+                      <div
+                        className="w-6 h-6 rounded-full grid place-items-center flex-shrink-0 text-white font-bold text-[9px]"
+                        style={{ background: rep?.color || '#4a9dcf' }}
+                      >
+                        {(rep?.name || '?').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()}
+                      </div>
+                    )}
+                    <span className="text-xs font-semibold text-cream truncate flex-1">
+                      {rep?.name || 'Unknown rep'}
+                    </span>
+                    <span className="text-[10px] text-mortar-500 flex-shrink-0">
+                      {slots.length} day{slots.length === 1 ? '' : 's'} open
+                    </span>
+                  </div>
+                  {/* Day rows for this rep */}
+                  <ul className="divide-y divide-mortar-800/60">
+                    {slots.map((s) => {
+                      const i = fitSuggestions.indexOf(s)
+                      const isHovered = hoveredIdx === i
+                      return (
+                        <SlotRow
+                          key={`${s.rep_id}-${s.day}-${s.insert_index}`}
+                          s={s}
+                          rep={rep}
+                          isHovered={isHovered}
+                          showRepName={false}
+                          onMouseEnter={() => handleHoverSuggestion(i, s)}
+                          onMouseLeave={handleUnhoverSuggestion}
+                          onClick={() => handleClickSuggestion(s)}
+                        />
+                      )
+                    })}
+                  </ul>
+                </div>
+              ))}
             </div>
           ) : (
+            // Default mode: flat top-5 list
             <ul className="divide-y divide-mortar-800">
               {fitSuggestions.map((s, i) => {
                 const rep = crews.find(c => c.id === s.rep_id)
                 const isHovered = hoveredIdx === i
                 return (
-                  <li
+                  <SlotRow
                     key={i}
-                    className={[
-                      'px-3 py-2.5 transition cursor-pointer',
-                      isHovered ? 'bg-mortar-800' : 'hover:bg-mortar-800/60',
-                    ].join(' ')}
+                    s={s}
+                    rep={rep}
+                    rank={i + 1}
+                    isHovered={isHovered}
+                    showRepName={true}
                     onMouseEnter={() => handleHoverSuggestion(i, s)}
                     onMouseLeave={handleUnhoverSuggestion}
                     onClick={() => handleClickSuggestion(s)}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="font-display text-2xl w-7 text-center flex-shrink-0" style={{ color: isHovered ? rep?.color : '#4a9dcf' }}>
-                        {i + 1}
-                      </div>
-                      {rep?.avatar_url ? (
-                        <img
-                          src={rep.avatar_url}
-                          alt=""
-                          className="w-8 h-8 rounded-full object-cover flex-shrink-0"
-                          style={{ boxShadow: `0 0 0 2px ${rep.color}` }}
-                          referrerPolicy="no-referrer"
-                        />
-                      ) : (
-                        <div
-                          className="w-8 h-8 rounded-full grid place-items-center flex-shrink-0 text-white font-bold text-[10px]"
-                          style={{ background: rep?.color || '#4a9dcf' }}
-                        >
-                          {(rep?.name || '?').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()}
-                        </div>
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-semibold text-mortar-300 truncate">
-                            {rep?.name || s.rep_id}
-                          </span>
-                          <span className="text-[10px] text-mortar-500 flex-shrink-0">
-                            {s.day_label}
-                          </span>
-                        </div>
-                        <div className="mt-1.5">
-                          <RouteChain suggestion={s} repColor={rep?.color || '#4a9dcf'} compact />
-                        </div>
-                      </div>
-                      <div className="text-right flex-shrink-0">
-                        <div className="text-[10px] uppercase tracking-wider text-mortar-500">Detour</div>
-                        <div className="text-sm font-bold leading-none" style={{ color: s.added_miles < 2 ? '#10b981' : s.added_miles < 10 ? '#f59e0b' : '#ef4444' }}>
-                          +{s.added_miles}mi
-                        </div>
-                        <div className="text-[10px] text-mortar-500 mt-0.5">+{s.added_drive_min}m</div>
-                      </div>
-                    </div>
-                  </li>
+                  />
                 )
               })}
             </ul>
@@ -527,6 +582,110 @@ export default function FitPanel({
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// ── SlotRow ──────────────────────────────────────────────────
+// Renders a single suggestion row. Used in both default top-5 mode and the
+// rep-grouped lock mode. The big change vs v0.18: a prominent leading
+// DayBadge instead of a tiny inline text label.
+function SlotRow({ s, rep, rank, isHovered, showRepName, onMouseEnter, onMouseLeave, onClick }) {
+  return (
+    <li
+      className={[
+        'px-3 py-2.5 transition cursor-pointer',
+        isHovered ? 'bg-mortar-800' : 'hover:bg-mortar-800/60',
+      ].join(' ')}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+      onClick={onClick}
+    >
+      <div className="flex items-center gap-2.5">
+        <DayBadge dayLabel={s.day_label} day={s.day} repColor={rep?.color || '#4a9dcf'} />
+        {showRepName && (rep?.avatar_url ? (
+          <img
+            src={rep.avatar_url}
+            alt=""
+            className="w-7 h-7 rounded-full object-cover flex-shrink-0"
+            style={{ boxShadow: `0 0 0 2px ${rep.color}` }}
+            referrerPolicy="no-referrer"
+          />
+        ) : (
+          <div
+            className="w-7 h-7 rounded-full grid place-items-center flex-shrink-0 text-white font-bold text-[10px]"
+            style={{ background: rep?.color || '#4a9dcf' }}
+          >
+            {(rep?.name || '?').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()}
+          </div>
+        ))}
+        <div className="flex-1 min-w-0">
+          {showRepName && (
+            <div className="text-xs font-semibold text-mortar-200 truncate">
+              {rank != null && <span className="text-ns-400 mr-1.5">#{rank}</span>}
+              {rep?.name || s.rep_id}
+            </div>
+          )}
+          <div className={showRepName ? 'mt-1' : ''}>
+            <RouteChain suggestion={s} repColor={rep?.color || '#4a9dcf'} compact />
+          </div>
+        </div>
+        <div className="text-right flex-shrink-0">
+          <div className="text-[9px] uppercase tracking-wider text-mortar-500">Detour</div>
+          <div className="text-sm font-bold leading-none" style={{ color: s.added_miles < 2 ? '#10b981' : s.added_miles < 10 ? '#f59e0b' : '#ef4444' }}>
+            +{s.added_miles}mi
+          </div>
+          <div className="text-[10px] text-mortar-500 mt-0.5">+{s.added_drive_min}m drive</div>
+        </div>
+      </div>
+    </li>
+  )
+}
+
+// ── DayBadge ─────────────────────────────────────────────────
+// Big visual day chip at the leading edge of each suggestion row. Two-line:
+// abbreviated weekday on top, day-of-month underneath. Special highlight for
+// Today/Tomorrow. Replaces the tiny text "Today" label that was easy to miss.
+function DayBadge({ dayLabel, day, repColor }) {
+  // Parse the ISO date for the bottom line
+  const d = day ? new Date(day + 'T12:00:00') : null
+  const isToday = dayLabel === 'Today'
+  const isTomorrow = dayLabel === 'Tomorrow'
+
+  // Top line: weekday short ("Mon", "Tue"...) — for Today/Tomorrow we override
+  const top = isToday ? 'TDY' : isTomorrow ? 'TMR' : (d ? d.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase() : '—')
+  // Bottom line: day-of-month
+  const bottom = d ? d.getDate() : '—'
+
+  // Color treatment: today gets the rep color filled in, tomorrow gets a
+  // lighter version, future days get a subtle outline. Keeps "act now" visually loud.
+  const fillColor = isToday ? repColor : 'transparent'
+  const textColor = isToday ? '#ffffff' : isTomorrow ? repColor : '#cbd5e0'
+  const borderColor = isToday ? repColor : isTomorrow ? repColor : '#3a4452'
+
+  return (
+    <div
+      className="flex flex-col items-center justify-center flex-shrink-0 rounded-md font-display"
+      style={{
+        width: 42,
+        height: 42,
+        background: fillColor,
+        border: `1.5px solid ${borderColor}`,
+        boxShadow: isToday ? `0 0 0 2px ${repColor}33, 0 2px 6px rgba(0,0,0,0.4)` : 'none',
+      }}
+    >
+      <span
+        className="text-[8px] font-bold tracking-[0.1em] leading-none"
+        style={{ color: isToday ? 'rgba(255,255,255,0.9)' : textColor }}
+      >
+        {top}
+      </span>
+      <span
+        className="text-base font-extrabold leading-none mt-0.5"
+        style={{ color: textColor }}
+      >
+        {bottom}
+      </span>
     </div>
   )
 }
