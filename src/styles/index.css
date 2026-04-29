@@ -184,26 +184,6 @@ html, body, #root {
   background: var(--cream);
   box-shadow: 0 0 6px rgba(255,255,255,0.5);
 }
-.fit-pin::after {
-  /* "NEW LEAD" stamp orbiting above the pin so users instantly know
-     this is the address being fit. Hidden on very narrow screens. */
-  content: 'NEW LEAD';
-  position: absolute;
-  top: -22px;
-  left: 50%;
-  transform: translateX(-50%);
-  font-family: 'Oswald', system-ui, sans-serif;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.15em;
-  color: var(--cream);
-  background: var(--ns-500);
-  padding: 3px 8px;
-  border-radius: 3px;
-  white-space: nowrap;
-  border: 1px solid var(--ns-300);
-  box-shadow: 0 2px 6px rgba(0,0,0,0.5);
-}
 @keyframes pulse-fit {
   0%, 100% {
     box-shadow:
@@ -217,6 +197,46 @@ html, body, #root {
       0 0 0 3px rgba(74,157,207,0.3),
       0 0 0 24px rgba(74,157,207,0);
   }
+}
+
+/* Permanent tooltip floating above the lead pin. Shows the address as
+   the protagonist of the screen — no clicking required to know what's
+   being fit. Overrides Leaflet's default tooltip styling to match the
+   dispatch palette. */
+.leaflet-tooltip.lead-callout {
+  background: linear-gradient(180deg, var(--ns-500), var(--ns-600));
+  border: 1px solid var(--ns-300);
+  color: var(--cream);
+  font-family: 'Oswald', system-ui, sans-serif;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.55), 0 0 0 1px rgba(0,0,0,0.3);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.leaflet-tooltip.lead-callout::before {
+  /* Pointer arrow at the bottom — connects callout to pin */
+  border-top-color: var(--ns-500);
+}
+.leaflet-tooltip.lead-callout .lead-callout-eyebrow {
+  display: block;
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: rgba(255,255,255,0.7);
+  font-weight: 700;
+  line-height: 1;
+  margin-bottom: 3px;
+  text-transform: uppercase;
+}
+.leaflet-tooltip.lead-callout .lead-callout-address {
+  display: block;
+  font-size: 12px;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ── HOME PINS ──────────────────────────────────────────── */

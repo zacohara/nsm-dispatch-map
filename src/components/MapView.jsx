@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react'
-import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet'
+import { MapContainer, TileLayer, Marker, Popup, Polyline, Tooltip, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import { formatTime, crewColor, MARKETS } from '../lib/utils'
 import { crewDayMiles, crewDayDriveMin } from '../lib/recommender'
@@ -718,6 +718,31 @@ export default function MapView({
           </>
         )}
 
+        {/* Fit mode — context layer: today's tasks from reps that AREN'T
+            recommended, rendered very faded. Gives the map context ("here's
+            the rest of the team's day") without competing with the candidates.
+            Skipped on preview hover so the previewed rep gets a clean stage. */}
+        {isFitMode && visible.map(t => {
+          if (recommendedRepIds.includes(t.crew_id)) return null
+          const rep = crews.find(c => c.id === t.crew_id)
+          if (!rep) return null
+          const initials = rep.name?.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase() || ''
+          const catColor = resolveCategoryColor(t)
+          return (
+            <Marker
+              key={`fit-context-${t.id}`}
+              position={[t.lat, t.lng]}
+              icon={teardropIcon(rep.color, initials, false, true, catColor)}
+              zIndexOffset={50}
+              opacity={0.55}
+            >
+              <Popup autoPanPaddingTopLeft={[40, 80]} autoPanPaddingBottomRight={[40, 60]} keepInView={true}>
+                <PopupCard task={t} rep={rep} />
+              </Popup>
+            </Marker>
+          )
+        })}
+
         {/* Fit mode: show each recommended rep's stops for their suggested day (dim) */}
         {isFitMode && fitResult.suggestions?.map((s, i) => {
           const rep = crews.find(c => c.id === s.rep_id)
@@ -825,6 +850,24 @@ export default function MapView({
             polylines and rep stop pins. */}
         {fitResult?.lat != null && (
           <Marker position={[fitResult.lat, fitResult.lng]} icon={fitIcon()} zIndexOffset={2500}>
+            {/* Permanent floating callout — shows the address inline on the
+                map so users never have to click the pin to confirm what
+                they're fitting. Auto-hides during preview to keep the
+                drawn route uncluttered. */}
+            {!isPreviewMode && (
+              <Tooltip
+                permanent
+                direction="top"
+                offset={[0, -16]}
+                className="lead-callout"
+              >
+                <span className="lead-callout-eyebrow">New lead</span>
+                <span className="lead-callout-address">
+                  {/* Show first two segments — usually street + city */}
+                  {fitResult.address?.split(',').slice(0, 2).join(',') || fitResult.address}
+                </span>
+              </Tooltip>
+            )}
             <Popup autoPanPaddingTopLeft={[40, 80]} autoPanPaddingBottomRight={[40, 60]} keepInView={true}>
               <div className="text-xs">
                 <div className="font-bold text-ns-400 mb-1">New lead</div>
