@@ -651,16 +651,16 @@ export default function MapView({
               positions={previewRoutePositions}
               pathOptions={{
                 color: previewRep.color,
-                weight: 3,
-                opacity: 0.55,
+                weight: 5,
+                opacity: 0.7,
               }}
             />
             <Polyline
               positions={previewRoutePositions}
               pathOptions={{
                 color: previewRep.color,
-                weight: 3,
-                opacity: 0.95,
+                weight: 5,
+                opacity: 1,
                 dashArray: '2 14',
                 lineCap: 'round',
                 className: 'route-line-flow',
@@ -792,8 +792,8 @@ export default function MapView({
             })}
             {routePositions && routePositions.length >= 2 && (
               <>
-                <Polyline positions={routePositions} pathOptions={{ color: selectedCrew?.color || '#4a9dcf', weight: 3, opacity: 0.55 }} />
-                <Polyline positions={routePositions} pathOptions={{ color: selectedCrew?.color || '#4a9dcf', weight: 3, opacity: 0.95, dashArray: '2 14', lineCap: 'round', className: 'route-line-flow' }} />
+                <Polyline positions={routePositions} pathOptions={{ color: selectedCrew?.color || '#4a9dcf', weight: 5, opacity: 0.7 }} />
+                <Polyline positions={routePositions} pathOptions={{ color: selectedCrew?.color || '#4a9dcf', weight: 5, opacity: 1, dashArray: '2 14', lineCap: 'round', className: 'route-line-flow' }} />
               </>
             )}
           </>

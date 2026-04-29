@@ -628,19 +628,58 @@ export default function FitPanel({
               </div>
             )}
 
-            {/* Footer with primary action */}
+            {/* Footer with primary action — explicit Search button so the
+                modal isn't autocomplete-only. If the user types a custom
+                address that doesn't match any suggestion (rare addresses,
+                P.O. boxes, sketchy autocomplete data), this lets them
+                still submit. Pressing Enter in the input does the same. */}
             <div className="px-5 py-3 bg-mortar-950/40 flex items-center justify-between gap-2">
-              <div className="text-[10px] text-mortar-500">
-                {query.length < 3 ? 'Type at least 3 characters, then pick from the list' :
-                 suggestions.length > 0 ? `${suggestions.length} match${suggestions.length === 1 ? '' : 'es'} — click one to search` :
-                 'Keep typing or refine the address'}
+              <div className="text-[10px] text-mortar-500 flex-1 min-w-0">
+                {query.length < 3 ? 'Type at least 3 characters · pick a suggestion or hit Search' :
+                 suggestions.length > 0 ? `${suggestions.length} match${suggestions.length === 1 ? '' : 'es'} — click one or hit Search` :
+                 'No matches in autocomplete — Search will look up the typed address directly'}
               </div>
               <button
                 type="button"
                 onClick={() => setSearchModalOpen(false)}
-                className="px-3 py-1.5 text-xs rounded border border-mortar-700 text-mortar-400 hover:text-mortar-200 hover:border-mortar-500"
+                className="px-3 py-1.5 text-xs rounded border border-mortar-700 text-mortar-400 hover:text-mortar-200 hover:border-mortar-500 flex-shrink-0"
               >
                 Cancel
+              </button>
+              <button
+                type="button"
+                disabled={query.trim().length < 3 || searching}
+                onClick={() => {
+                  // Prefer the highlighted/first autocomplete pick if any
+                  // suggestions are loaded (that gives us pre-resolved
+                  // lat/lng for free); otherwise submit the raw typed
+                  // address — backend will geocode via Nominatim.
+                  if (suggestions.length > 0) {
+                    runSearch(activeIdx >= 0 ? suggestions[activeIdx] : suggestions[0])
+                  } else {
+                    runSearch({ address: query.trim(), lat: null, lng: null })
+                  }
+                }}
+                className={[
+                  'px-4 py-1.5 text-xs font-semibold rounded border flex items-center gap-1.5 transition flex-shrink-0',
+                  query.trim().length >= 3 && !searching
+                    ? 'bg-ns-500 hover:bg-ns-400 border-ns-300 text-white shadow-md shadow-ns-900/40'
+                    : 'bg-mortar-900 border-mortar-800 text-mortar-600 cursor-not-allowed',
+                ].join(' ')}
+              >
+                {searching ? (
+                  <>
+                    <span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                    Searching…
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>
+                    </svg>
+                    Search
+                  </>
+                )}
               </button>
             </div>
           </div>
@@ -649,7 +688,7 @@ export default function FitPanel({
 
       {/* Results drawer */}
       {resultsOpen && currentResult && (
-        <div className="absolute bottom-full left-0 right-0 bg-mortar-900 border-t border-ns-600 shadow-[0_-12px_40px_rgba(0,0,0,0.6)] max-h-[50vh] overflow-y-auto z-20">
+        <div className="absolute bottom-full left-0 right-0 bg-mortar-900 border-t border-ns-600 shadow-[0_-12px_40px_rgba(0,0,0,0.6)] max-h-[55vh] overflow-y-auto z-[1000]">
           {/* ── Banner ────────────────────────────────────────
               The honest answer to "what is on my screen right now."
               Shows the address being fit (hero), the day window being
