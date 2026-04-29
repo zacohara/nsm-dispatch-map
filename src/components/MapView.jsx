@@ -197,9 +197,9 @@ function fitIcon() {
   return L.divIcon({
     className: '',
     html: `<div class="fit-pin"></div>`,
-    iconSize: [28, 28],
-    iconAnchor: [14, 14],
-    popupAnchor: [0, -14],
+    iconSize: [36, 36],
+    iconAnchor: [18, 18],
+    popupAnchor: [0, -18],
   })
 }
 
@@ -515,17 +515,43 @@ export default function MapView({
       {/* Preview banner (hover mode) */}
       {isPreviewMode && previewRep && (
         <div
-          className="absolute top-3 left-1/2 -translate-x-1/2 z-[500] bg-mortar-900/95 backdrop-blur border rounded-lg shadow-xl px-4 py-2 flex items-center gap-3 pointer-events-none"
+          className="absolute top-3 left-1/2 -translate-x-1/2 z-[500] bg-mortar-900/95 backdrop-blur border-2 rounded-lg shadow-2xl px-4 py-2.5 flex items-center gap-3 pointer-events-none"
           style={{ borderColor: previewRep.color }}
         >
-          <div className="text-[10px] uppercase tracking-[0.2em] text-ns-400 font-display">Preview</div>
-          <div className="h-4 w-px bg-mortar-700" />
+          <div className="text-[10px] uppercase tracking-[0.2em] font-display" style={{ color: previewRep.color }}>
+            Previewing
+          </div>
+          <div className="h-5 w-px bg-mortar-700" />
           <div className="flex items-center gap-2">
-            <div className="w-2.5 h-2.5 rounded-full" style={{ background: previewRep.color }} />
+            {previewRep.avatar_url ? (
+              <img
+                src={previewRep.avatar_url}
+                alt=""
+                className="w-6 h-6 rounded-full object-cover"
+                style={{ boxShadow: `0 0 0 2px ${previewRep.color}` }}
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <div
+                className="w-6 h-6 rounded-full grid place-items-center text-white font-bold text-[9px]"
+                style={{ background: previewRep.color }}
+              >
+                {(previewRep.name || '?').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()}
+              </div>
+            )}
             <span className="font-semibold text-cream text-sm">{previewRep.name}</span>
-            <span className="text-mortar-500 text-[11px]">
-              · {previewSuggestion.day_label} · +{previewSuggestion.added_miles}mi detour
-            </span>
+          </div>
+          <div className="h-5 w-px bg-mortar-700" />
+          <div className="flex items-center gap-2 text-[11px]">
+            <span className="text-mortar-300 font-semibold">{previewSuggestion.day_label}</span>
+            {previewSuggestion.slot_start && (
+              <>
+                <span className="text-mortar-600">·</span>
+                <span className="text-cream font-bold font-display">{previewSuggestion.slot_start}</span>
+              </>
+            )}
+            <span className="text-mortar-600">·</span>
+            <span className="text-mortar-400">+{previewSuggestion.added_miles}mi · +{previewSuggestion.added_drive_min}m drive</span>
           </div>
         </div>
       )}
@@ -793,8 +819,11 @@ export default function MapView({
             )
           })}
 
-        {/* Fit-search destination pin (any mode that includes fitResult) */}
-        {fitResult?.lat != null && !isPreviewMode && (
+        {/* Fit-search destination pin (visible in fit AND preview modes —
+            it's the protagonist of the screen, always). zIndexOffset 2500
+            keeps it on top of everything else, including hovered route
+            polylines and rep stop pins. */}
+        {fitResult?.lat != null && (
           <Marker position={[fitResult.lat, fitResult.lng]} icon={fitIcon()} zIndexOffset={2500}>
             <Popup autoPanPaddingTopLeft={[40, 80]} autoPanPaddingBottomRight={[40, 60]} keepInView={true}>
               <div className="text-xs">

@@ -71,12 +71,13 @@ export default async (req) => {
 
   const sb = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } })
 
-  // Window: [today, today + FIT_WINDOW_DAYS − 1] inclusive.
-  // Match src/lib/utils.js FIT_WINDOW_DAYS.
-  const FIT_WINDOW_DAYS = 5
+  // Window: [today, today + WINDOW_DAYS − 1] inclusive.
+  // Extended to 14 to support the client-side "4+ days" bucket. The legacy
+  // FIT_WINDOW_DAYS=5 in src/lib/utils.js is for non-fit surfaces only.
+  const WINDOW_DAYS = 14
   const today = new Date()
   const startISO = today.toISOString().slice(0, 10)
-  const end = new Date(today); end.setDate(end.getDate() + (FIT_WINDOW_DAYS - 1))
+  const end = new Date(today); end.setDate(end.getDate() + (WINDOW_DAYS - 1))
   const endISO = end.toISOString().slice(0, 10)
 
   const [{ data: repsRaw }, { data: tasks }] = await Promise.all([
@@ -160,7 +161,7 @@ export default async (req) => {
   // at every gap (before stop 1, between stops, after last).
   const candidates = []
   const days = []
-  for (let i = 0; i < FIT_WINDOW_DAYS; i++) {
+  for (let i = 0; i < WINDOW_DAYS; i++) {
     const d = new Date(today); d.setDate(d.getDate() + i)
     days.push(d.toISOString().slice(0, 10))
   }
@@ -182,6 +183,16 @@ export default async (req) => {
         // Empty day — but if a partial blocker exists, it still counts as "some" work
         const penalty_miles = isWeekend ? 25 : 8
         const penalty_min = Math.round((penalty_miles / 35) * 60)
+        // Default slot start for an empty day: 9:00am — gives the rep time
+        // to leave home, hit traffic, and get to the lead at a normal hour.
+        const slotStartMin = 9 * 60
+        const slotEndMin = slotStartMin + Math.max(60, Math.round((duration_hrs || 1) * 60))
+        const fmtTime = (mins) => {
+          const h = Math.floor(mins / 60), m = mins % 60
+          const period = h >= 12 ? 'pm' : 'am'
+          const h12 = ((h + 11) % 12) + 1
+          return `${h12}:${String(m).padStart(2, '0')}${period}`
+        }
         candidates.push({
           rep_id: rep.id,
           priority_tier: rep.priority_tier ?? 2,
@@ -193,6 +204,9 @@ export default async (req) => {
           added_miles: penalty_miles,
           rank_miles: penalty_miles + tierBias(rep),
           added_drive_min: penalty_min,
+          slot_start: fmtTime(slotStartMin),
+          slot_end: fmtTime(slotEndMin),
+          slot_start_min: slotStartMin,
           _blockerRanges: blockerRanges,
         })
         continue
@@ -243,41 +257,51 @@ export default async (req) => {
           added_drive_min += 17  // 10mi @ 35mph
         }
 
+        // Estimate the slot's start time from surrounding stops. Used both
+        // for the collision check below AND surfaced in the response so the
+        // UI can show "Tue 10:30am" without re-deriving it client-side.
+        let slotStartMin
+        if (k === 0) {
+          const first = stops[0]
+          if (first.start_time) {
+            const [h, m] = first.start_time.split(':').map(Number)
+            slotStartMin = Math.max(8 * 60, (h * 60 + (m || 0)) - 2 * 60)
+          } else {
+            slotStartMin = 8 * 60
+          }
+        } else if (k === N) {
+          const last = stops[N - 1]
+          if (last.start_time) {
+            const [h, m] = last.start_time.split(':').map(Number)
+            slotStartMin = (h * 60 + (m || 0)) + 2 * 60
+          } else {
+            slotStartMin = 14 * 60
+          }
+        } else {
+          const prev = stops[k - 1]
+          if (prev.start_time) {
+            const [h, m] = prev.start_time.split(':').map(Number)
+            slotStartMin = (h * 60 + (m || 0)) + 90
+          } else {
+            slotStartMin = 12 * 60
+          }
+        }
+        const slotEndMin = slotStartMin + Math.max(60, Math.round((duration_hrs || 2) * 60))
+
         // Collision check: if there are partial blockers on this day, reject
         // this candidate if our insertion would land inside the blocker window.
-        // Estimates slot start time from the surrounding stop's start_time.
-        const collidesWithBlocker = (() => {
-          if (!blockerRanges.length) return false
-          let slotStartMin
-          if (k === 0) {
-            const first = stops[0]
-            if (first.start_time) {
-              const [h, m] = first.start_time.split(':').map(Number)
-              slotStartMin = Math.max(8 * 60, (h * 60 + (m || 0)) - 2 * 60)
-            } else {
-              slotStartMin = 8 * 60
-            }
-          } else if (k === N) {
-            const last = stops[N - 1]
-            if (last.start_time) {
-              const [h, m] = last.start_time.split(':').map(Number)
-              slotStartMin = (h * 60 + (m || 0)) + 2 * 60
-            } else {
-              slotStartMin = 14 * 60
-            }
-          } else {
-            const prev = stops[k - 1]
-            if (prev.start_time) {
-              const [h, m] = prev.start_time.split(':').map(Number)
-              slotStartMin = (h * 60 + (m || 0)) + 90
-            } else {
-              slotStartMin = 12 * 60
-            }
-          }
-          const slotEndMin = slotStartMin + Math.max(60, Math.round((duration_hrs || 2) * 60))
-          return blockerRanges.some(r => slotStartMin < r.endMin && slotEndMin > r.startMin)
-        })()
+        const collidesWithBlocker = blockerRanges.length > 0 &&
+          blockerRanges.some(r => slotStartMin < r.endMin && slotEndMin > r.startMin)
         if (collidesWithBlocker) continue
+
+        // Format slot times for display: "9:30am" / "2:00pm" — same convention
+        // as the existing day-strip and timeline widgets.
+        const fmtTime = (mins) => {
+          const h = Math.floor(mins / 60), m = mins % 60
+          const period = h >= 12 ? 'pm' : 'am'
+          const h12 = ((h + 11) % 12) + 1
+          return `${h12}:${String(m).padStart(2, '0')}${period}`
+        }
 
         candidates.push({
           rep_id: rep.id,
@@ -288,6 +312,11 @@ export default async (req) => {
           added_miles: Math.round(added_miles * 10) / 10,
           rank_miles: added_miles + tierBias(rep),
           added_drive_min: Math.round(added_drive_min),
+          // New for v0.22: surface the slot timing so the UI can display
+          // "Tue 10:30am–11:30am" without re-deriving it from day_stops.
+          slot_start: fmtTime(slotStartMin),
+          slot_end: fmtTime(slotEndMin),
+          slot_start_min: slotStartMin,
         })
       }
     }

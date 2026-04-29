@@ -58,6 +58,30 @@ export function sortReps(crews) {
   })
 }
 
+// ── Fit-search day buckets ───────────────────────────────────────
+// Categorize an ISO date relative to today into one of three buckets used
+// by the search modal's window filter: 'today' | 'next3' | 'later'.
+//   - today: just today
+//   - next3: tomorrow + the 2 days after (3-day rolling window)
+//   - later: anything 4+ days out
+// Anchored to *today* per call (not memoized) so the value is correct even
+// if the user keeps the modal open across midnight.
+export function dayBucket(iso) {
+  if (!iso) return null
+  const d = new Date(iso + 'T12:00:00')
+  const today = new Date(); today.setHours(0, 0, 0, 0)
+  const diff = Math.round((d - today) / 86400000)
+  if (diff <= 0) return 'today'
+  if (diff <= 3) return 'next3'
+  return 'later'
+}
+
+export const DAY_BUCKETS = {
+  today: { id: 'today', label: 'Today', short: 'TDY' },
+  next3: { id: 'next3', label: 'Next 3 days', short: 'NEXT 3' },
+  later: { id: 'later', label: '4+ days out', short: '4+ DAYS' },
+}
+
 export function todayISO() {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`

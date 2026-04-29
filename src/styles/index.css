@@ -155,29 +155,68 @@ html, body, #root {
   to { stroke-dashoffset: -32; }
 }
 
-/* ── FIT-SEARCH PIN ─────────────────────────────────────── */
+/* ── FIT-SEARCH PIN ─────────────────────────────────────── 
+   The lead being fit. This is the protagonist of the screen — should
+   read as "this is the address you searched" instantly. Larger than
+   any other pin, branded ice-blue, dramatic outer pulse so the eye
+   goes here first. */
 .fit-pin {
-  width: 28px;
-  height: 28px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
   background: var(--ns-400);
   border: 4px solid var(--cream);
-  box-shadow: 0 3px 12px rgba(0,0,0,0.7);
-  animation: pulse-fit 1.6s infinite;
+  box-shadow:
+    0 4px 20px rgba(0,0,0,0.8),
+    0 0 0 3px rgba(74,157,207,0.3);
+  animation: pulse-fit 1.8s infinite;
   position: relative;
+  z-index: 1;
 }
 .fit-pin::before {
+  /* Inner dot */
   content: '';
   position: absolute;
   top: 50%; left: 50%;
   transform: translate(-50%, -50%);
-  width: 8px; height: 8px;
+  width: 10px; height: 10px;
   border-radius: 50%;
   background: var(--cream);
+  box-shadow: 0 0 6px rgba(255,255,255,0.5);
+}
+.fit-pin::after {
+  /* "NEW LEAD" stamp orbiting above the pin so users instantly know
+     this is the address being fit. Hidden on very narrow screens. */
+  content: 'NEW LEAD';
+  position: absolute;
+  top: -22px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: 'Oswald', system-ui, sans-serif;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  color: var(--cream);
+  background: var(--ns-500);
+  padding: 3px 8px;
+  border-radius: 3px;
+  white-space: nowrap;
+  border: 1px solid var(--ns-300);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.5);
 }
 @keyframes pulse-fit {
-  0%, 100% { box-shadow: 0 3px 12px rgba(0,0,0,0.7), 0 0 0 0 rgba(74,157,207,0.75); }
-  50%      { box-shadow: 0 3px 12px rgba(0,0,0,0.7), 0 0 0 20px rgba(74,157,207,0); }
+  0%, 100% {
+    box-shadow:
+      0 4px 20px rgba(0,0,0,0.8),
+      0 0 0 3px rgba(74,157,207,0.3),
+      0 0 0 0 rgba(74,157,207,0.6);
+  }
+  50% {
+    box-shadow:
+      0 4px 20px rgba(0,0,0,0.8),
+      0 0 0 3px rgba(74,157,207,0.3),
+      0 0 0 24px rgba(74,157,207,0);
+  }
 }
 
 /* ── HOME PINS ──────────────────────────────────────────── */
