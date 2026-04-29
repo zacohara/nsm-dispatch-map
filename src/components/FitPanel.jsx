@@ -688,7 +688,7 @@ export default function FitPanel({
 
       {/* Results drawer */}
       {resultsOpen && currentResult && (
-        <div className="absolute bottom-full left-0 right-0 bg-mortar-900 border-t border-ns-600 shadow-[0_-12px_40px_rgba(0,0,0,0.6)] max-h-[55vh] overflow-y-auto z-[1000]">
+        <div className="absolute bottom-full left-0 right-0 bg-mortar-900 border-t border-ns-600 shadow-[0_-12px_40px_rgba(0,0,0,0.6)] max-h-[38vh] overflow-y-auto z-[1000]">
           {/* ── Banner ────────────────────────────────────────
               The honest answer to "what is on my screen right now."
               Shows the address being fit (hero), the day window being
